@@ -1920,3 +1920,46 @@ async def get_timed_lyrics_previous_and_next() -> tuple:
         safe_get_line(idx + 2),
         safe_get_line(idx + 3)
     )
+
+
+def get_line_sync_timing_context() -> Optional[Dict[str, Any]]:
+    """
+    Returns timing metadata for line-sync UI anticipation.
+
+    This exposes enough information for the frontend to pre-grow the upcoming
+    line before it becomes current (without requiring word-level timing data).
+    """
+    if not current_song_lyrics or not current_song_data:
+        return None
+
+    idx = _find_current_lyric_index()
+    if idx < 0 or idx >= len(current_song_lyrics):
+        return None
+
+    # Need a valid "next line" boundary for anticipation.
+    if idx + 1 >= len(current_song_lyrics):
+        return None
+
+    try:
+        current_start = float(current_song_lyrics[idx][0])
+        next_start = float(current_song_lyrics[idx + 1][0])
+        position = float(current_song_data.get("position", 0.0))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+    if next_start <= current_start:
+        return None
+
+    duration = next_start - current_start
+    progress = (position - current_start) / duration
+    progress = max(0.0, min(1.0, progress))
+    time_to_next_ms = max(0.0, (next_start - position) * 1000.0)
+
+    return {
+        "current_index": idx,
+        "current_start": current_start,
+        "next_start": next_start,
+        "line_duration_ms": duration * 1000.0,
+        "line_progress": progress,
+        "time_to_next_ms": time_to_next_ms
+    }

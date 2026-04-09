@@ -129,6 +129,37 @@ export function setLyricsInDom(lyrics) {
     }, 100);
 }
 
+/**
+ * Apply line-sync anticipation styling for upcoming line in pixel-scroll mode.
+ * This runs every poll tick (not only on lyric text changes) so the next line
+ * can smoothly grow before the line boundary.
+ *
+ * @param {Object|null} timing - line_sync_timing from /lyrics payload
+ */
+export function updateLineSyncAnticipation(timing) {
+    const nextEl = document.getElementById('next-1');
+    const lyricsEl = document.getElementById('lyrics');
+    if (!nextEl || !lyricsEl) return;
+
+    // Do not interfere with word-sync renderer modes.
+    if (hasWordSync && wordSyncEnabled) {
+        nextEl.classList.remove('line-anticipating-current');
+        return;
+    }
+
+    const pixelScrollActive = lyricsEl.classList.contains('pixel-scroll-mode');
+    const timeToNextMs = timing?.time_to_next_ms;
+
+    // Match the smoother anticipation window used in word-sync pixel mode.
+    const anticipationMs = 900;
+    const shouldAnticipate = pixelScrollActive
+        && typeof timeToNextMs === 'number'
+        && timeToNextMs >= 0
+        && timeToNextMs <= anticipationMs;
+
+    nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+}
+
 // ========== THEME COLOR ==========
 
 /**
