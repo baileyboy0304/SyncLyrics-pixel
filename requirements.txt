@@ -1,0 +1,56 @@
+# Core Dependencies
+quart>=0.20.0
+pillow>=10.3.0       # Compatible with Python 3.13
+requests>=2.31.0
+pystray>=0.19.4
+python-benedict>=0.31.0
+desktop-notifier>=3.5.6
+
+# Platform Specific
+winsdk>=1.0.0b9; platform_system == "Windows"
+pywin32>=306; platform_system == "Windows"
+pycaw; platform_system == "Windows"
+
+# dbus-next>=0.2.3; platform_system == "Linux"
+# python-xlib>=0.33; platform_system == "Linux"
+
+# Flask Dependencies
+werkzeug>=3.0.0
+jinja2>=3.1.2
+click>=8.1.4
+blinker>=1.7.0
+itsdangerous>=2.1.2
+
+# Image Processing
+numpy>=1.26.4
+# matplotlib>=3.8.0  # Not used - was kept for potential future use
+
+# Font Metadata
+fonttools>=4.50.0     # Extract font family names from font files
+
+# Utilities
+colorama>=0.4.6
+pyyaml>=6.0.2
+urllib3>=2.0.3
+python-dotenv>=1.0.0
+
+# ASGI Server
+hypercorn>=0.14.3
+
+# Build System
+pyinstaller>=6.0.0
+
+# Lyrics Providers
+zeroconf>=0.131.0
+spotipy>=2.23.0
+
+# Audio Recognition (Reaper Integration)
+shazamio>=0.8.1            # Audio fingerprinting via Shazam
+sounddevice>=0.5.0         # Cross-platform audio capture
+psutil>=5.9.0              # Process detection for Reaper (optional, has fallbacks)
+cryptography>=41.0.0  # Required for HTTPS support
+# scipy removed - using numpy fallback for audio resampling (saves ~100MB)
+
+# Music Assistant Integration
+music-assistant-client>=1.0.0  # WebSocket client for Music Assistant server
+

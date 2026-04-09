@@ -1,0 +1,547 @@
+"""
+Local Audio Fingerprinting Module
+
+Uses SoundFingerprinting (via sfp-cli) for instant, offline recognition
+of songs in the user's local music library.
+
+This module is ENV-guarded and only loaded if LOCAL_FP_ENABLED=true.
+"""
+
+import asyncio
+import json
+import subprocess
+import sys
+import tempfile
+import wave
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+from logging_config import get_logger
+from .shazam import RecognitionResult
+from .capture import AudioChunk
+from .daemon import DaemonManager
+
+logger = get_logger(__name__)
+
+# Subprocess fallback is intentionally disabled.
+# In fallback mode the full fingerprint DB would be loaded fresh on every query
+# call (~every 2s) — extremely heavy (full DB load + .NET process spawn per cycle).
+# When the daemon fails permanently, defer gracefully to Shazam/ACRCloud instead.
+# Flip to True only for debugging/testing purposes.
+_SUBPROCESS_FALLBACK_ENABLED = False
+
+
+class LocalRecognizer:
+    """
+    Local audio fingerprinting using SoundFingerprinting CLI.
+    
+    Acts as first-pass recognition before Shazamio/ACRCloud.
+    Uses the user's own FLAC library as the fingerprint database.
+    
+    Features:
+    - Instant recognition (no network latency)
+    - Works offline
+    - Returns offset for lyrics synchronization
+    - Integrates with existing RecognitionResult format
+    
+    NOTE: This class is only imported if LOCAL_FP_ENABLED=true.
+    """
+    
+    # FFmpeg args for converting to SFP format (5512Hz mono)
+    # FFMPEG_ARGS = ["-ac", "1", "-ar", "5512", "-loglevel", "error"]
+    
+    def __init__(self, db_path: Optional[Path] = None, cli_path: Optional[Path] = None, min_confidence: Optional[float] = None):
+        """
+        Initialize local fingerprint recognizer.
+        
+        Args:
+            db_path: Path to fingerprint database (default: from config)
+            cli_path: Path to sfp-cli directory (default: from config)
+            min_confidence: Minimum confidence threshold (default: from config)
+        """
+        # Lazy load config to avoid circular imports
+        from config import LOCAL_FINGERPRINT
+        
+        self._db_path = db_path or LOCAL_FINGERPRINT["db_path"]
+        self._cli_path = cli_path or LOCAL_FINGERPRINT["cli_path"]
+        # Use config value if not explicitly passed (None check, not truthy check)
+        self._min_confidence = min_confidence if min_confidence is not None else LOCAL_FINGERPRINT["min_confidence"]
+        self._available = None  # Lazy check
+        self._exe_path = None  # Path to built executable
+        self._daemon: Optional[DaemonManager] = None  # Lazy initialized
+        self._no_match_count = 0  # Throttled INFO logging counter
+        
+        logger.info(f"LocalRecognizer initialized: db={self._db_path}, min_conf={self._min_confidence}")
+    
+    def _get_daemon(self) -> Optional[DaemonManager]:
+        """Get or create daemon manager (lazy initialization)."""
+        if self._daemon is None:
+            exe_path = self._get_exe_path()
+            if exe_path:
+                self._daemon = DaemonManager(exe_path, Path(self._db_path))
+        return self._daemon
+    
+    def stop_daemon(self) -> None:
+        """Stop the daemon process if running. Called when engine stops."""
+        if self._daemon:
+            self._daemon.stop()
+            self._daemon = None
+    
+    async def prewarm_daemon(self) -> bool:
+        """
+        Pre-warm the daemon in background to eliminate cold-start latency.
+        
+        Called when engine starts to load FFmpeg and fingerprint database
+        before the first recognition request. This reduces first-query
+        latency from ~30s to <1s.
+        
+        Returns:
+            True if daemon started successfully, False otherwise
+        """
+        if not self.is_available():
+            logger.debug("Local FP not available, skipping daemon prewarm")
+            return False
+        
+        daemon = self._get_daemon()
+        if daemon is None:
+            logger.debug("Could not create daemon manager")
+            return False
+        
+        logger.info("Pre-warming local fingerprint daemon...")
+        success = await daemon.start()
+        if success:
+            logger.info("Local fingerprint daemon pre-warmed and ready")
+        else:
+            logger.warning("Daemon prewarm failed - will retry on first query")
+        return success
+    
+    def _get_exe_path(self) -> Optional[Path]:
+        """Get path to pre-built sfp-cli executable, building if needed."""
+        if self._exe_path is not None:
+            return self._exe_path
+        
+        # Check for existing published executable
+        publish_dir = self._cli_path / "bin" / "publish"
+        exe_name = "sfp-cli.exe" if sys.platform == "win32" else "sfp-cli"
+        exe_path = publish_dir / exe_name
+        
+        if exe_path.exists():
+            self._exe_path = exe_path
+            logger.debug(f"Using pre-built sfp-cli: {exe_path}")
+            return exe_path
+        
+        # Build the executable
+        logger.info("Building sfp-cli executable (one-time)...")
+        try:
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            result = subprocess.run(
+                ["dotnet", "publish", "-c", "Release", "-o", str(publish_dir)],
+                cwd=str(self._cli_path),
+                capture_output=True,
+                text=True,
+                timeout=120,
+                creationflags=creationflags
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"Failed to build sfp-cli: {result.stderr}")
+                return None
+            
+            if exe_path.exists():
+                self._exe_path = exe_path
+                logger.info(f"Built sfp-cli executable: {exe_path}")
+                return exe_path
+            else:
+                logger.error(f"Build succeeded but exe not found at {exe_path}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to build sfp-cli: {e}")
+            return None
+    
+    def is_available(self) -> bool:
+        """
+        Check if local fingerprinting is available.
+        
+        Returns True if:
+        - sfp-cli executable exists (or can be built)
+        - Database files exist (fingerprints folder + metadata.json)
+        
+        NOTE: We don't run sfp-cli stats here to avoid loading the database twice
+        (once for the check, once for the daemon). The daemon will verify on startup.
+        """
+        if self._available is not None:
+            return self._available
+        
+        try:
+            # Check if CLI exists
+            if not (self._cli_path / "sfp-cli.csproj").exists():
+                logger.warning(f"sfp-cli not found at {self._cli_path}")
+                self._available = False
+                return False
+            
+            # Ensure executable is built
+            if self._get_exe_path() is None:
+                logger.warning("sfp-cli executable not available")
+                self._available = False
+                return False
+            
+            # Fast check: verify database files exist (no CLI call needed)
+            # This avoids loading the entire database just to check availability
+            db_path = Path(self._db_path)
+            fingerprint_path = db_path / "fingerprints"
+            metadata_path = db_path / "metadata.json"
+            
+            if not fingerprint_path.exists():
+                logger.info(f"Local fingerprint database not found: {fingerprint_path}")
+                self._available = False
+                return False
+            
+            if not metadata_path.exists():
+                logger.info(f"Local fingerprint metadata not found: {metadata_path}")
+                self._available = False
+                return False
+            
+            # Quick check: metadata.json should have content (not empty)
+            try:
+                metadata_size = metadata_path.stat().st_size
+                if metadata_size < 10:  # Empty JSON {} is ~2 bytes
+                    logger.info("Local fingerprint database is empty (no metadata)")
+                    self._available = False
+                    return False
+            except OSError:
+                self._available = False
+                return False
+            
+            logger.info(f"Local fingerprinting available (database exists at {db_path})")
+            self._available = True
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Local fingerprinting check failed: {e}")
+            self._available = False
+            return False
+    
+    async def _query_via_daemon(self, wav_path: str, duration: int, offset: int = 0) -> Optional[Dict[str, Any]]:
+        """
+        Query via daemon (fast path, async-safe).
+        
+        Returns None if daemon is not available, requiring fallback to subprocess.
+        """
+        daemon = self._get_daemon()
+        if not daemon:
+            return None
+        
+        # If daemon is in fallback mode, skip it
+        if daemon.in_fallback_mode:
+            return None
+        
+        result = await daemon.send_command({
+            "cmd": "query",
+            "path": wav_path,
+            "duration": duration,
+            "offset": offset
+        })
+        
+        return result
+    
+    async def _run_cli_command_async(self, command: str, *args) -> Dict[str, Any]:
+        """
+        Run sfp-cli command and return JSON result (async version).
+        
+        For 'query' commands, tries daemon first (fast), falls back to subprocess (slow).
+        """
+        # For query commands, try daemon first (fast path)
+        if command == "query" and len(args) >= 2:
+            wav_path = args[0]
+            duration = int(args[1])
+            offset = int(args[2]) if len(args) > 2 else 0
+            
+            daemon_result = await self._query_via_daemon(wav_path, duration, offset)
+            if daemon_result is not None:
+                return daemon_result
+            
+            # Check if daemon exists but isn't ready yet (still loading or crashed)
+            # In this case, fail fast instead of blocking with subprocess
+            daemon = self._get_daemon()
+            if daemon and not daemon.in_fallback_mode:
+                if not daemon.is_running:
+                    # Daemon process is dead (crashed), not just loading — trigger background restart.
+                    # This cycle falls through to Shazam/ACRCloud immediately (non-blocking).
+                    logger.warning("Local FP daemon is dead, triggering background restart")
+                    asyncio.create_task(daemon._ensure_daemon())
+                # Daemon is loading or restarting — fail fast, let recognition fall through
+                return {"error": "Daemon loading/restarting, please wait", "matched": False}
+            
+            # Only fall through to subprocess if daemon is in fallback mode
+            # (i.e., daemon failed permanently and subprocess is our only option)
+
+        # Subprocess fallback (slow path) - disabled by default, see _SUBPROCESS_FALLBACK_ENABLED
+        if not _SUBPROCESS_FALLBACK_ENABLED:
+            # Log at debug to avoid spam (daemon.py already logs a warning when fallback mode activates)
+            logger.debug("Local FP in permanent fallback mode — deferring to Shazam/ACRCloud")
+            return {"matched": False}
+
+        # Subprocess fallback (slow path) - only reached if _SUBPROCESS_FALLBACK_ENABLED = True
+        # Run in thread to avoid blocking event loop
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._run_cli_command_sync, command, *args
+        )
+    
+    def _run_cli_command_sync(self, command: str, *args) -> Dict[str, Any]:
+        """Run sfp-cli command synchronously (for subprocess fallback)."""
+        exe_path = self._get_exe_path()
+        if exe_path is None:
+            return {"error": "sfp-cli executable not available"}
+        
+        cmd = [
+            str(exe_path),
+            "--db-path", str(self._db_path.absolute()),
+            command
+        ] + list(args)
+        
+        try:
+            # Hide console window on Windows
+            creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=creationflags
+            )
+            
+            # Parse JSON from stdout
+            stdout = result.stdout.strip()
+            for line in stdout.split('\n'):
+                line = line.strip()
+                if line.startswith('{'):
+                    return json.loads(line)
+            
+            return {"error": f"No JSON output: {stdout[:200]}"}
+            
+        except subprocess.TimeoutExpired:
+            return {"error": "CLI timeout"}
+        except json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON: {e}"}
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def recognize(self, audio: AudioChunk, wav_bytes: Optional[bytes] = None) -> Optional[RecognitionResult]:
+        """
+        Recognize audio against local fingerprint database.
+        
+        Args:
+            audio: AudioChunk with capture timing info
+            wav_bytes: Optional WAV bytes (not used - we convert AudioChunk directly)
+            
+        Returns:
+            RecognitionResult or None if no match
+        """
+        import time
+        
+        if not self.is_available():
+            return None
+        
+        try:
+            # Write AudioChunk to WAV file for sfp-cli
+            # FFmpegAudioService handles downsampling internally, so we just need standard WAV
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav_file:
+                wav_path = Path(wav_file.name)
+                
+                # Write standard WAV (FFmpegAudioService will handle conversion to 5512Hz mono)
+                with wave.open(str(wav_path), 'wb') as wf:
+                    wf.setnchannels(audio.channels)
+                    wf.setsampwidth(2)  # int16
+                    wf.setframerate(audio.sample_rate)
+                    wf.writeframes(audio.data.tobytes())
+            
+            # NOTE: FFmpegAudioService now handles format conversion internally
+            # Old FFmpeg conversion code commented out for reference:
+            # with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as sfp_file:
+            #     sfp_path = Path(sfp_file.name)
+            # creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            # ffmpeg_result = subprocess.run(
+            #     ["ffmpeg", "-i", str(raw_path)] + self.FFMPEG_ARGS + [str(sfp_path), "-y"],
+            #     capture_output=True,
+            #     timeout=10,
+            #     creationflags=creationflags
+            # )
+            # raw_path.unlink()
+            # if ffmpeg_result.returncode != 0:
+            #     logger.warning("FFmpeg conversion failed for local recognition")
+            #     sfp_path.unlink()
+            #     return None
+            
+            # Query sfp-cli (async to not block event loop)
+            # FFmpegAudioService handles the downsampling to 5512Hz mono internally
+            duration = int(audio.duration)
+            query_start = time.time()
+            result = await self._run_cli_command_async("query", str(wav_path), str(duration), "0")
+            query_time = time.time() - query_start
+            
+            # Clean up temp file
+            wav_path.unlink()
+
+            
+            recognition_time = time.time()
+            
+            if not result.get("matched"):
+                self._no_match_count += 1
+                # Throttled INFO logging: 1st and every 4th (mirrors Shazam pattern)
+                if self._no_match_count == 1 or self._no_match_count % 4 == 0:
+                    logger.info(f"Local FP: No match (attempt #{self._no_match_count}) | Audio: {audio.duration:.1f}s | Query: {query_time:.2f}s")
+                else:
+                    logger.debug(f"Local FP: No match (attempt #{self._no_match_count}) | Audio: {audio.duration:.1f}s | Query: {query_time:.2f}s")
+                return None
+            
+            # Extract best match from multi-match response format
+            # New format: {"matched": true, "bestMatch": {...}, "matches": [...]}
+            matches = result.get("matches", [])
+            
+            # Use multi-match position verification if we have multiple matches
+            if len(matches) > 1:
+                # Import select_best_match helper
+                from .audio_buffer import select_best_match, PositionTracker, get_multi_match_enabled
+                
+                # Check if multi-match is enabled via config/ENV
+                if get_multi_match_enabled():
+                    # Get expected position from position tracker (if available)
+                    # The tracker is managed by the engine and passed via class attribute
+                    expected_position = None
+                    if hasattr(self, '_position_tracker') and self._position_tracker:
+                        expected_position = self._position_tracker.get_expected_position()
+                    
+                    # Pass timing info so we can calculate current_position for each match
+                    best, selection_reason, should_clear_buffer = select_best_match(
+                        matches, 
+                        expected_position,
+                        capture_start_time=audio.capture_start_time,
+                        recognition_time=recognition_time
+                    )
+                    
+                    # Signal buffer clear if confidence fallback was used (likely song change)
+                    if should_clear_buffer and hasattr(self, '_position_tracker') and self._position_tracker:
+                        # Signal engine to clear buffer - likely song change or seek
+                        logger.debug("Multi-match: Signaling buffer clear due to confidence fallback")
+                        self._position_tracker.signal_buffer_clear()
+                    
+                    logger.info(f"Multi-match selection: {selection_reason} ({len(matches)} candidates)")
+                else:
+                    # Multi-match disabled - just use highest confidence
+                    sorted_by_confidence = sorted(matches, key=lambda m: m.get("confidence", 0), reverse=True)
+                    best = sorted_by_confidence[0]
+                    selection_reason = "highest confidence (multi-match disabled)"
+                    logger.debug(f"Multi-match disabled: using highest confidence ({len(matches)} candidates)")
+            else:
+                # Single match or backward compatibility
+                best = result.get("bestMatch", result)
+                selection_reason = "single match"
+            
+            # Debug log with query stats
+            logger.debug(f"Local query stats: Audio: {audio.duration:.1f}s | Query: {query_time:.2f}s | Matches: {len(matches)}")
+            
+            # Check confidence thresholds
+            confidence = best.get("confidence", 0)
+            artist = best.get("artist", "Unknown")
+            title = best.get("title", "Unknown")
+            offset = best.get("trackMatchStartsAt", 0)
+            
+            # Get reject threshold from config (absolute floor - garbage below this)
+            from config import LOCAL_FINGERPRINT
+            reject_threshold = LOCAL_FINGERPRINT.get("reject_threshold")
+            
+            # Outright reject matches below the absolute floor
+            if confidence < reject_threshold:
+                logger.info(
+                    f"Local: REJECTED (below floor) | "
+                    f"{artist} - {title} | "
+                    f"Offset: {offset:.1f}s | "
+                    f"Conf: {confidence:.2f} < {reject_threshold}"
+                )
+                return None  # Don't even send to engine
+            
+            # Log matches below high-confidence threshold (will go to verification)
+            if confidence < self._min_confidence:
+                logger.info(
+                    f"Local: Below high-conf threshold | "
+                    f"{artist} - {title} | "
+                    f"Offset: {offset:.1f}s | "
+                    f"Conf: {confidence:.2f} < {self._min_confidence} (needs verification)"
+                )
+                # NOTE: We still return the match - engine handles validation/verification
+                # for low confidence matches via Reaper validation or multi-match
+            
+            # Build RecognitionResult from best match
+            track_offset = best.get("trackMatchStartsAt", 0)
+            
+            # CRITICAL: Adjust capture_start_time for buffered audio
+            # queryMatchStartsAt tells us where in OUR QUERY the match was found
+            # This allows correct latency compensation when using rolling buffer
+            query_match_offset = best.get("queryMatchStartsAt", 0)
+            adjusted_capture_start = audio.capture_start_time + query_match_offset
+            
+            recognition = RecognitionResult(
+                title=best.get("title", "Unknown"),
+                artist=best.get("artist", "Unknown"),
+                offset=float(track_offset),
+                capture_start_time=adjusted_capture_start,  # Adjusted for buffer
+                recognition_time=recognition_time,
+                confidence=confidence,
+                time_skew=0.0,
+                frequency_skew=0.0,
+                track_id=best.get("songId"),
+                album=best.get("album"),
+                album_art_url=None,  # Will be enriched later
+                isrc=best.get("isrc"),  # Now provided by sfp-cli
+                shazam_url=None,
+                spotify_url=None,
+                background_image_url=None,
+                genre=best.get("genre"),  # Now provided by sfp-cli
+                shazam_lyrics_text=None,
+                recognition_provider="local_fingerprint",
+                duration=best.get("duration")
+            )
+            
+            latency = recognition.get_latency()
+            current_pos = recognition.get_current_position()
+            
+            # Update position tracker for next recognition
+            if hasattr(self, '_position_tracker') and self._position_tracker:
+                self._position_tracker.update(current_pos, best.get("songId", ""))
+            
+            # Reset no-match counter on successful match
+            self._no_match_count = 0
+            
+            logger.info(
+                f"Local: {recognition.artist} - {recognition.title} | "
+                f"Offset: {track_offset:.1f}s | QueryOffset: {query_match_offset:.1f}s | "
+                f"Current: {current_pos:.1f}s | Latency: {latency:.1f}s | Conf: {confidence:.2f}"
+            )
+            
+            # Save debug match to cache
+            self._save_debug_match(result, selection_reason)
+            
+            return recognition
+            
+        except Exception as e:
+            logger.error(f"Local recognition failed: {e}")
+            return None
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get database statistics."""
+        return self._run_cli_command_sync("stats")
+    
+    def _save_debug_match(self, result: dict, selection_reason: str = "") -> None:
+        """Save match to both history file and single match file."""
+        from .debug_utils import save_match_to_history, save_single_match
+        
+        extra_data = {"selection_reason": selection_reason}
+        
+        # Save to history (keeps last 6 matches)
+        save_match_to_history(provider="local", result=result, extra_data=extra_data)
+        
+        # Also save to single match file (last_local_match.json)
+        save_single_match(provider="local", result=result, extra_data=extra_data)
+

@@ -1,0 +1,1004 @@
+/* ========== PROVIDER INFO BADGE ========== */
+.provider-info {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 150;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+    /* Reset top/left/transform from previous center positioning */
+    top: auto;
+    left: auto;
+    transform: none;
+}
+
+/* Push provider badge up when bottom nav is visible */
+body:not(.hide-nav) .provider-info {
+    bottom: 56px;
+}
+
+.provider-info.hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(10px);
+}
+
+/* Hide the "Source:" label for a cleaner look */
+.provider-label {
+    display: none;
+}
+
+.provider-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    /* More transparent/discreet */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    /* Dimmer text by default */
+    padding: 4px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-family: inherit;
+    font-size: 0.75rem;
+    /* Smaller font */
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    box-shadow: none;
+    /* No shadow by default for discreet look */
+
+}
+
+.provider-badge:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    /* Brighten on hover */
+}
+
+.provider-badge:active {
+    transform: scale(0.95);
+}
+
+/* Icon removed in HTML, but just in case */
+.provider-icon {
+    display: none;
+}
+
+/* ========== PROVIDER MODAL ========== */
+.provider-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.provider-modal:not(.hidden) {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.provider-modal.hidden {
+    display: flex;
+    /* Keep flex to maintain layout during transition */
+}
+
+.provider-modal-content {
+    background: rgba(30, 32, 48, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 20px;
+    max-width: 900px;
+    width: 95%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    transform: scale(0.95) translateY(20px);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    /* Prevent pull-to-refresh and overscroll bounce inside modal */
+    overscroll-behavior: contain;
+    overscroll-behavior-y: contain; /* Vertical only - more specific */
+    -webkit-overscroll-behavior: contain; /* Safari/WebView support */
+    -webkit-overscroll-behavior-y: contain; /* Safari/WebView vertical */
+    touch-action: manipulation; /* Allow scrolling and zoom, but prevent pull-to-refresh and double-tap zoom */
+}
+
+.provider-modal:not(.hidden) .provider-modal-content {
+    transform: scale(1) translateY(0);
+}
+
+/* Modal Header */
+.provider-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    padding-bottom: 0;
+}
+
+.provider-modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+}
+
+.modal-close {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1.5rem;
+    cursor: pointer;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    transform: rotate(90deg);
+}
+
+/* Provider List */
+.provider-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.provider-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 16px 20px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    /* Make whole item clickable if we wanted, but we have button */
+}
+
+.provider-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateX(4px);
+}
+
+.provider-item.current-provider {
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.05));
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.provider-item-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.provider-item-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;  /* Allow badges to wrap when space is tight */
+}
+
+.provider-item-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: #fff;
+}
+
+/* Badges */
+.current-badge,
+.cached-badge {
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.current-badge {
+    background: #3b82f6;
+    color: white;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+.cached-badge {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.provider-item-meta {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* Select Button */
+.provider-select-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+}
+
+.provider-select-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+}
+
+.current-provider .provider-select-btn {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #60a5fa;
+    cursor: default;
+}
+
+/* Provider item buttons container */
+.provider-item-buttons {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+/* Word-sync provider button */
+.provider-ws-btn {
+    background: transparent;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: rgba(139, 92, 246, 0.9);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.8rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.provider-ws-btn:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.5);
+    color: #a78bfa;
+}
+
+.provider-ws-btn.active {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.6);
+    color: #a78bfa;
+    cursor: default;
+}
+
+/* Modal Footer */
+.provider-modal-footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    /* border-top: 1px solid rgba(255, 255, 255, 0.1); */
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: rgba(239, 68, 68, 0.9);
+    padding: 10px 24px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-secondary:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #ef4444;
+    transform: translateY(-1px);
+}
+
+.btn-danger {
+    background: rgba(220, 38, 38, 0.15);
+    border: 1px solid rgba(220, 38, 38, 0.4);
+    color: #ef4444;
+    padding: 10px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-danger:hover {
+    background: rgba(220, 38, 38, 0.25);
+    border-color: rgba(220, 38, 38, 0.7);
+    color: #f87171;
+    transform: translateY(-1px);
+}
+
+/* Instrumental Button - Cycles between Auto and Marked as Instrumental */
+.btn-instrumental {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 10px 20px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-instrumental:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    transform: translateY(-1px);
+}
+
+/* Active state - Marked as Instrumental (Blue) */
+.btn-instrumental.active {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+    color: #60a5fa;
+}
+
+.btn-instrumental.active:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.7);
+    color: #93c5fd;
+}
+
+/* Reload Settings Button */
+.btn-reload {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 10px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-reload:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+    transform: translateY(-1px);
+}
+
+/* Scrollbar for modal */
+.provider-modal-content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.provider-modal-content::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.provider-modal-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.provider-modal-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(20, 20, 20, 0.95);
+    color: #fff;
+    padding: 14px 24px;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 30000;
+    opacity: 0;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    font-weight: 500;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast-success {
+    border-left: 4px solid #4caf50;
+}
+
+.toast-error {
+    border-left: 4px solid #ef4444;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .provider-info {
+        top: 50px; /* Match settings icon top position */
+        bottom: auto; /* Override bottom positioning */
+        right: 60px;
+        left: auto; /* Ensure left is not set */
+
+        /* Rotate the badge vertically */
+        writing-mode: vertical-rl;  /* Text flows top-to-bottom */
+        text-orientation: mixed;
+        right: 14px;
+    }
+
+    .top-right-controls {
+        top: 0.5rem;
+        right: 0.5rem;
+    }
+
+    .provider-badge {
+       /* padding: 4px 12px; */
+        font-size: 0.65rem;
+        padding: 6px 5px;
+        border-radius: 14px;  /* Instead of 12px */
+    }
+
+    .provider-modal-content {
+        padding: 16px;
+        width: 95%;
+    }
+    
+    /* Provider items: stack content and buttons vertically */
+    .provider-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 14px;
+    }
+    
+    .provider-item-buttons {
+        width: 100%;
+        flex-wrap: wrap;
+        flex-shrink: 1;
+    }
+    
+    .provider-select-btn,
+    .provider-ws-btn {
+        padding: 6px 12px;
+        font-size: 0.8rem;
+    }
+    
+    /* Art grid: 2 columns with smaller gap */
+    .art-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    
+    /* Style controls: stack on mobile */
+    .style-controls-section h4 {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .style-buttons {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    
+    /* Footer buttons: smaller on mobile */
+    .provider-modal-footer {
+        gap: 8px;
+    }
+    
+    .btn-secondary,
+    .btn-danger {
+        padding: 8px 12px;
+        font-size: 0.8rem;
+    }
+    
+    /* Provider tabs: allow scrolling if needed */
+    .provider-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .provider-tab {
+        padding: 10px 14px;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+}
+
+
+/* ========== PROVIDER TABS ========== */
+.provider-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.provider-tab {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 12px 20px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+    position: relative;
+    bottom: -1px; /* Align with border */
+}
+
+.provider-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.provider-tab.active {
+    color: #fff;
+    border-bottom-color: #3b82f6;
+}
+
+.provider-tab-content {
+    display: none;
+}
+
+.provider-tab-content.active {
+    display: block;
+}
+
+/* ========== LYRICS HEADER ROW (with latency controls) ========== */
+.lyrics-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 4px;
+    /* border-bottom: 1px solid rgba(255, 255, 255, 0.1); */
+}
+
+.lyrics-header-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.latency-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.latency-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    /* Prevent touch delays and scroll interference on mobile */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.latency-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+    color: #fff;
+}
+
+.latency-btn:active {
+    transform: scale(0.95);
+}
+
+.latency-value {
+    min-width: 50px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Highlight when offset is non-zero */
+.latency-value.adjusted {
+    color: #60a5fa;
+}
+
+/* Container for style toggle + latency controls */
+.lyrics-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Word-sync style toggle button (Pop/Fade/PopFade) */
+.word-sync-style-btn {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 6px;
+    color: rgba(139, 92, 246, 0.9);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    text-transform: capitalize;
+}
+
+.word-sync-style-btn:hover {
+    background: rgba(139, 92, 246, 0.25);
+    border-color: rgba(139, 92, 246, 0.5);
+    color: #a78bfa;
+}
+
+/* Latency UI visibility toggle button (Show/Hide) */
+.latency-ui-toggle {
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.latency-ui-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* Active state when UI is visible */
+.latency-ui-toggle.active {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: rgba(59, 130, 246, 0.9);
+}
+
+/* ========== ALBUM ART GRID ========== */
+.art-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+    /* Prevent pull-to-refresh and overscroll bounce */
+    overscroll-behavior: contain;
+    touch-action: manipulation; /* Allow scrolling and zoom, but prevent pull-to-refresh and double-tap zoom */
+}
+
+
+.art-card {
+    position: relative;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    aspect-ratio: 1; /* Square cards */
+}
+
+.art-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.art-card.selected {
+    border-color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.art-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.art-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+    padding: 12px;
+    color: #fff;
+}
+
+.art-card-provider {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.art-card-resolution {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.art-card-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #3b82f6;
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 4px 8px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+}
+
+.art-card.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 140px;
+}
+
+.art-card.loading::after {
+    content: '';
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments for art grid */
+@media (max-width: 600px) {
+    .art-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 12px;
+    }
+    
+    .provider-tabs {
+        margin-bottom: 20px;
+    }
+    
+    .provider-tab {
+        padding: 10px 16px;
+        font-size: 0.9rem;
+    }
+}
+
+/* DESKTOP SPLIT VIEW (New) */
+@media (min-width: 768px) {
+    .provider-modal-content {
+        max-width: 93vw;
+        width: 95%;
+        max-height: 90vh; /* Reverted to original size */
+        min-height: 500px; /* Ensure modal has minimum height for split view */
+        overflow-y: hidden; /* Prevent body scroll, use inner scroll */
+        display: flex;
+        flex-direction: column;
+    }
+
+    .provider-content-wrapper {
+        display: grid;
+        grid-template-columns: 2fr 3fr;
+        gap: 16px;
+        overflow: hidden;
+        flex: 1; /* Take remaining height */
+        min-height: 0; /* CRITICAL: Allows nested flex/grid scrolling to work properly */
+    }
+
+    .provider-tabs {
+        display: none; /* Hide tabs on desktop */
+    }
+
+    .provider-tab-content {
+        display: flex !important; /* Force show both */
+        flex-direction: column;
+        overflow: hidden;
+        height: 100%;
+    }
+
+    /* Scrollable areas within columns */
+    .provider-list, 
+    #album-art-grid {
+        overflow-y: auto;
+        padding-right: 8px; /* Space for scrollbar */
+        flex: 1;
+        /* Custom Scrollbar for inner lists */
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.2) rgba(0, 0, 0, 0.1);
+        /* Prevent pull-to-refresh and overscroll bounce */
+        overscroll-behavior: contain;
+        touch-action: manipulation; /* Allow scrolling and zoom, but prevent pull-to-refresh and double-tap zoom */
+    }
+    
+    /* Headers for columns (simulated) */
+    .provider-tab-content::before {
+        content: attr(data-title);
+        display: block;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 8px;
+        padding-bottom: 0;
+        /* border-bottom: 1px solid rgba(255, 255, 255, 0.1); */
+        flex-shrink: 0; /* Prevent header from being squished when content is long */
+    }
+    
+    .provider-modal-footer {
+        margin-top: auto; /* Push to bottom if content is short */
+        flex-shrink: 0; /* Prevent footer from being squished when content is long */
+    }
+}
+
+/* COMPACT Background Style Controls */
+.style-controls-section {
+    /* Remove padding and background for cleaner look */
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    margin-bottom: 10px;
+    text-align: left; /* Align with content */
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* Spread title and buttons */
+    /* border-bottom: 1px solid rgba(255,255,255,0.1); */
+    padding-bottom: 2px;
+}
+
+.style-controls-section h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+    /* Renamed "Background Style" to simpler "Style" in your head if desired, or keep as is */
+}
+
+.style-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-bottom: 0; /* Remove margin */
+}
+
+.style-btn {
+    padding: 4px 12px; /* Smaller padding */
+    font-size: 0.75rem; /* Smaller text */
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; /* Less rounded, more sleek */
+    cursor: pointer;
+    transition: all 0.2s;
+    color: rgba(255,255,255,0.7);
+}
+
+.style-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: white;
+}
+
+.style-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    color: white;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Hide the hint text */
+.style-hint {
+    display: none;
+}
+
+/* FIX: Grid Overlapping */
+.art-grid {
+    display: grid;
+    /* Fixed 2 columns for consistent layout */
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+    /* Ensure the grid respects the container width */
+    width: 100%; 
+    /* Ensure content flows naturally */
+    grid-auto-rows: min-content; /* Changed from max-content to min-content to fit content exactly */
+    align-items: start; /* Align items to top of their cells */
+}
+/* Header for Artist Images Section */
+/*
+.artist-images-header {
+    grid-column: 1 / -1; 
+    width: 100%;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.8);
+    font-size: 0.9rem;
+    font-weight: 600;
+    
+    display: flex;
+    align-items: center;
+    
+    grid-row-start: auto;
+}
+*/

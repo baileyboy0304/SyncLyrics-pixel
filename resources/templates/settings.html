@@ -1,0 +1,916 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="settings-wrapper">
+    <div class="settings-container">
+        <!-- Sidebar -->
+        <div class="settings-sidebar">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="sidebar-title mb-0">Settings</h3>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="history.back()" title="Close">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="nav flex-column nav-pills" id="v-pills-tab" role="tablist" aria-orientation="vertical">
+                {% for category in settings.keys() %}
+                <button
+                    class="nav-link {% if loop.first %}active{% endif %} {% if category == 'Deprecated' %}deprecated-tab{% endif %}"
+                    id="v-pills-{{ category|lower|replace(' ', '-') }}-tab" data-bs-toggle="pill"
+                    data-bs-target="#v-pills-{{ category|lower|replace(' ', '-') }}" type="button" role="tab">
+                    {% if category == 'Deprecated' %}
+                    <i class="bi bi-archive me-2"></i>
+                    {% elif category == 'Debug' %}
+                    <i class="bi bi-bug me-2"></i>
+                    {% elif category == 'Server' %}
+                    <i class="bi bi-hdd-network me-2"></i>
+                    {% elif category == 'UI' %}
+                    <i class="bi bi-palette me-2"></i>
+                    {% elif category == 'Lyrics' %}
+                    <i class="bi bi-music-note-list me-2"></i>
+                    {% elif category == 'Providers' %}
+                    <i class="bi bi-cloud-download me-2"></i>
+                    {% elif category == 'System' %}
+                    <i class="bi bi-windows me-2"></i>
+                    {% elif category == 'Features' %}
+                    <i class="bi bi-toggles me-2"></i>
+                    {% elif category == 'Media' %}
+                    <i class="bi bi-disc me-2"></i>
+                    {% elif category == 'Spotify API' %}
+                    <i class="bi bi-spotify me-2"></i>
+                    {% elif category == 'Album Art' %}
+                    <i class="bi bi-image me-2"></i>
+                    {% elif category == 'Artist Image' %}
+                    <i class="bi bi-person-badge me-2"></i>
+                    {% elif category == 'Visual Mode' %}
+                    <i class="bi bi-eye me-2"></i>
+                    {% elif category == 'Audio Recognition' %}
+                    <i class="bi bi-soundwave me-2"></i>
+                    {% elif category == 'UDP Recognition' %}
+                    <i class="bi bi-broadcast me-2"></i>
+                    {% elif category == 'HTTPS' %}
+                    <i class="bi bi-shield-lock me-2"></i>
+                    {% else %}
+                    <i class="bi bi-gear me-2"></i>
+                    {% endif %}
+                    {{ category }}
+                </button>
+                {% endfor %}
+            </div>
+
+            <div class="sidebar-footer">
+                <a href="{{ url_for('reset_defaults') }}" class="btn btn-outline-danger w-100 btn-sm"
+                    onclick="return confirm('Reset all settings to defaults?');">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Defaults
+                </a>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="settings-content-area">
+            <form action="{{ url_for('settings_page') }}" method="post" id="settingsForm">
+                <!-- Flash messages are handled by base.html -->
+
+                <div class="tab-content" id="v-pills-tabContent">
+                    <!-- Dynamic Categories -->
+                    {% for category, category_settings in settings.items() %}
+                    <div class="tab-pane fade {% if loop.first %}show active{% endif %}"
+                        id="v-pills-{{ category|lower|replace(' ', '-') }}" role="tabpanel">
+                        <h4 class="section-title">
+                            {{ category }}
+                            {% if category == 'Deprecated' %}
+                            <span class="badge bg-secondary ms-2">Not actively used</span>
+                            {% endif %}
+                        </h4>
+
+                        {% if category == 'Deprecated' %}
+                        <div class="alert alert-warning mb-4">
+                            <i class="bi bi-info-circle me-2"></i>
+                            These settings are defined but not currently wired up to any functionality.
+                            They are kept for potential future use or backwards compatibility.
+                        </div>
+                        {% endif %}
+
+                        <div class="settings-card">
+                            {% for key, setting in category_settings.items() %}
+                            {% if not setting.advanced %}
+                            <div
+                                class="setting-item {% if setting.requires_restart %}needs-restart{% endif %} {% if setting.deprecated %}deprecated{% endif %}">
+                                <div class="setting-header">
+                                    <label class="form-label" for="{{ key }}">
+                                        {{ setting.name }}
+                                        {% if setting.requires_restart %}
+                                        <span class="badge bg-warning text-dark ms-2" data-bs-toggle="tooltip"
+                                            title="Requires Restart">
+                                            <i class="bi bi-power"></i>
+                                        </span>
+                                        {% endif %}
+                                    </label>
+                                    {% if setting.description %}
+                                    <small class="text-muted d-block">{{ setting.description }}</small>
+                                    {% endif %}
+                                </div>
+
+                                <div class="setting-control">
+                                    {% if setting.widget_type == "switch" %}
+                                    <div class="form-check form-switch">
+                                        <input type="checkbox" class="form-check-input" id="{{ key }}" name="{{ key }}"
+                                            {% if setting.value %}checked{% endif %}>
+                                    </div>
+                                    {% elif setting.widget_type == "select" %}
+                                    <select class="form-select" id="{{ key }}" name="{{ key }}">
+                                        {% for opt in setting.options %}
+                                        <option value="{{ opt }}" {% if setting.value==opt %}selected{% endif %}>
+                                            {{ opt }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% elif setting.widget_type == "slider" %}
+                                    {# Dynamic step: 0.05 for update_interval and font_size, 1 for integers, 0.1 for other floats #}
+                                    {% set step_val = '0.05' if ('update_interval' in key or 'font_size' in key) else ('1' if setting.type == 'int' else '0.1') %}
+                                    <div class="slider-wrapper">
+                                        <input type="range" class="form-range" id="{{ key }}" name="{{ key }}"
+                                            min="{{ setting.min_val }}" max="{{ setting.max_val }}" step="{{ step_val }}"
+                                            value="{{ setting.value }}"
+                                            oninput="syncSliderToInput('{{ key }}', this.value)">
+                                        <input type="number" class="slider-input" id="input-{{ key }}"
+                                            value="{{ setting.value }}" step="{{ step_val }}"
+                                            min="{{ setting.min_val }}" max="{{ setting.max_val }}"
+                                            onchange="syncInputToSlider('{{ key }}', this.value)"
+                                            onkeydown="if(event.key==='Enter'){event.preventDefault(); syncInputToSlider('{{ key }}', this.value);}">
+                                    </div>
+                                    {% elif setting.widget_type == "color" %}
+                                    <div class="input-group">
+                                        <input type="color" class="form-control form-control-color" id="{{ key }}"
+                                            name="{{ key }}" value="{{ setting.value }}" title="Choose your color">
+                                        <input type="text" class="form-control" value="{{ setting.value }}"
+                                            onchange="document.getElementById('{{ key }}').value = this.value" readonly>
+                                    </div>
+                                    {% elif setting.widget_type == "number" %}
+                                    <input type="number" class="form-control" id="{{ key }}" name="{{ key }}"
+                                        value="{{ setting.value if setting.value is not none else '' }}" {% if
+                                        setting.min_val is not none %}min="{{ setting.min_val }}" {% endif %} {% if
+                                        setting.max_val is not none %}max="{{ setting.max_val }}" {% endif %}>
+                                    {% elif setting.widget_type == "list" %}
+                                    <!-- List Widget -->
+                                    <div class="list-widget">
+                                        <div class="tag-container" id="tags-{{ key }}">
+                                            {% if setting.value is iterable and setting.value is not string %}
+                                            {% for item in setting.value %}
+                                            <span class="tag">
+                                                {{ item }}
+                                                <button type="button" class="tag-remove"
+                                                    onclick="removeTag(this)">&times;</button>
+                                            </span>
+                                            {% endfor %}
+                                            {% endif %}
+                                        </div>
+                                        {% if 'blocklist' in key %}
+                                        <!-- Quick-add dropdown for blocklist -->
+                                        <div class="input-group mt-2">
+                                            <select class="form-select" id="quick-{{ key }}"
+                                                    onchange="quickAddTag('{{ key }}', this.value); this.selectedIndex=0;">
+                                                <option value="">Add common browser...</option>
+                                                <option value="chrome">Chrome</option>
+                                                <option value="msedge">Microsoft Edge</option>
+                                                <option value="firefox">Firefox</option>
+                                                <option value="brave">Brave</option>
+                                                <option value="opera">Opera</option>
+                                                <option value="vivaldi">Vivaldi</option>
+                                                <option value="arc">Arc</option>
+                                            </select>
+                                        </div>
+                                        {% endif %}
+                                        <div class="input-group mt-2">
+                                            <input type="text" class="form-control list-input" placeholder="Add custom app..."
+                                                id="input-{{ key }}"
+                                                onkeypress="if(event.key==='Enter'){event.preventDefault();addTag('{{ key }}');}">
+                                            <button type="button" class="btn btn-outline-secondary"
+                                                onclick="addTag('{{ key }}')">
+                                                <i class="bi bi-plus"></i>
+                                            </button>
+                                        </div>
+                                        <input type="hidden" name="{{ key }}" id="hidden-{{ key }}"
+                                            value="{{ setting.value | tojson if setting.value else '[]' }}">
+                                    </div>
+                                    {% else %}
+                                    <input type="text" class="form-control" id="{{ key }}" name="{{ key }}"
+                                        value="{{ setting.value }}">
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                            {% endfor %}
+
+                            <!-- Advanced Settings (Collapsible) -->
+                            {% set has_advanced = category_settings.values() | selectattr('advanced') | list | length >
+                            0 %}
+                            {% if has_advanced %}
+                            <div class="advanced-settings-section mt-3">
+                                <button class="btn btn-sm btn-outline-secondary w-100" type="button"
+                                    data-bs-toggle="collapse"
+                                    data-bs-target="#advanced-{{ category|lower|replace(' ', '-') }}"
+                                    aria-expanded="false">
+                                    <i class="bi bi-gear me-1"></i> Advanced Settings
+                                </button>
+                                <div class="collapse mt-3" id="advanced-{{ category|lower|replace(' ', '-') }}">
+                                    {% for key, setting in category_settings.items() %}
+                                    {% if setting.advanced %}
+                                    <div class="setting-item advanced-item">
+                                        <div class="setting-header">
+                                            <label class="form-label" for="{{ key }}">{{ setting.name }}</label>
+                                            {% if setting.description %}
+                                            <small class="text-muted d-block">{{ setting.description }}</small>
+                                            {% endif %}
+                                        </div>
+                                        <div class="setting-control">
+                                            {% if setting.widget_type == "number" %}
+                                            <input type="number" class="form-control" id="{{ key }}" name="{{ key }}"
+                                                value="{{ setting.value if setting.value is not none else '' }}" {% if
+                                                setting.min_val is not none %}min="{{ setting.min_val }}" {% endif %} {%
+                                                if setting.max_val is not none %}max="{{ setting.max_val }}" {% endif
+                                                %}>
+                                            {% else %}
+                                            <input type="text" class="form-control" id="{{ key }}" name="{{ key }}"
+                                                value="{{ setting.value }}">
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Sticky Save Bar -->
+                <div class="save-bar">
+                    <div class="d-flex align-items-center justify-content-between w-100">
+                        <div id="restart-notice" class="text-warning" style="display: none;">
+                            <i class="bi bi-exclamation-triangle me-2"></i>Some changes require restart
+                        </div>
+                        <button type="submit" class="btn btn-primary px-4 ms-auto">
+                            <i class="bi bi-save me-2"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Flash messages need higher z-index to appear above the modal */
+    .messages {
+        position: fixed;
+        top: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1100;
+        width: auto;
+        max-width: 90%;
+    }
+
+    /* Layout */
+    .settings-wrapper {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(10px);
+        z-index: 1050;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 2rem;
+    }
+
+    .settings-container {
+        display: flex;
+        width: 100%;
+        max-width: 1100px;
+        height: 85vh;
+        background: rgba(30, 32, 48, 0.95);
+        border-radius: 16px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+    }
+
+    /* Sidebar */
+    .settings-sidebar {
+        width: 250px;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid rgba(255, 255, 255, 0.05);
+        overflow-y: auto;
+    }
+
+    .sidebar-title {
+        color: white;
+        font-size: 1.5rem;
+        margin-bottom: 2rem;
+        padding-left: 0.5rem;
+    }
+
+    .nav-pills .nav-link {
+        color: rgba(255, 255, 255, 0.7);
+        text-align: left;
+        padding: 0.8rem 1rem;
+        margin-bottom: 0.2rem;
+        border-radius: 8px;
+        transition: all 0.2s;
+        font-size: 0.9rem;
+    }
+
+    .nav-pills .nav-link:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+    }
+
+    .nav-pills .nav-link.active {
+        background: rgba(59, 130, 246, 0.2);
+        color: #60a5fa;
+        font-weight: 500;
+    }
+
+    .nav-pills .nav-link.deprecated-tab {
+        color: rgba(255, 255, 255, 0.4);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin-top: 1rem;
+        padding-top: 1rem;
+    }
+
+    .sidebar-footer {
+        margin-top: auto;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* Content Area */
+    .settings-content-area {
+        flex: 1;
+        padding: 2rem;
+        overflow-y: auto;
+        position: relative;
+    }
+
+    .section-title {
+        color: white;
+        margin-bottom: 1.5rem;
+        font-weight: 300;
+        font-size: 1.8rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        padding-bottom: 1rem;
+        display: flex;
+        align-items: center;
+    }
+
+    .settings-card {
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 12px;
+        padding: 1.5rem;
+    }
+
+    /* Setting Items */
+    .setting-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .setting-item:last-child {
+        border-bottom: none;
+    }
+
+    .setting-item.deprecated {
+        opacity: 0.7;
+    }
+
+    .setting-header {
+        flex: 1;
+        padding-right: 2rem;
+    }
+
+    .setting-control {
+        width: 280px;
+        flex-shrink: 0;
+    }
+
+    /* Form Controls */
+    .form-control,
+    .form-select {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: white;
+    }
+
+    .form-control:focus,
+    .form-select:focus {
+        background: rgba(0, 0, 0, 0.4);
+        border-color: #60a5fa;
+        color: white;
+        box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
+    }
+
+    .form-control::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+    }
+
+    .form-switch .form-check-input {
+        width: 3em;
+        height: 1.5em;
+        cursor: pointer;
+    }
+
+    .form-range::-webkit-slider-thumb {
+        background: #60a5fa;
+    }
+
+    /* Slider Wrapper */
+    .slider-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+    }
+
+    .slider-wrapper .form-range {
+        flex: 1;
+    }
+
+  /*  .slider-value {
+        min-width: 60px;
+        text-align: right;
+        color: #60a5fa;
+        font-weight: 500;
+        font-size: 0.9rem;
+    } */
+
+    /* Slider Input (editable number field) */
+    .slider-input {
+        width: 85px;
+        height: 36px;
+        text-align: center;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #60a5fa;
+        border-radius: 6px;
+        padding: 0.4rem 0.5rem;
+        font-weight: 500;
+        font-size: 0.95rem;
+        flex-shrink: 0;
+    }
+
+    .slider-input:focus {
+        outline: none;
+        border-color: #60a5fa;
+        background: rgba(0, 0, 0, 0.4);
+        box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25);
+    }
+
+    /* Hide number input spinners for cleaner look */
+    .slider-input::-webkit-outer-spin-button,
+    .slider-input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        appearance: none;
+        margin: 0;
+    }
+    .slider-input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+
+    /* List Widget */
+    .list-widget {
+        width: 100%;
+    }
+
+    .tag-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        min-height: 2rem;
+    }
+
+    .tag {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(96, 165, 250, 0.2);
+        color: #60a5fa;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.85rem;
+    }
+
+    .tag-remove {
+        background: none;
+        border: none;
+        color: #60a5fa;
+        padding: 0;
+        margin-left: 0.5rem;
+        cursor: pointer;
+        font-size: 1rem;
+        line-height: 1;
+    }
+
+    .tag-remove:hover {
+        color: #ef4444;
+    }
+
+    /* Advanced Settings Section */
+    .advanced-settings-section {
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 1rem;
+    }
+
+    .advanced-settings-section .btn-outline-secondary {
+        color: rgba(255, 255, 255, 0.5);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .advanced-settings-section .btn-outline-secondary:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .advanced-item {
+        opacity: 0.8;
+        background: rgba(0, 0, 0, 0.2);
+        margin: 0.5rem 0;
+        padding: 1rem;
+        border-radius: 8px;
+    }
+
+    /* Save Bar */
+    .save-bar {
+        position: sticky;
+        bottom: -2rem;
+        margin: 2rem -2rem -2rem -2rem;
+        padding: 1rem 2rem;
+        background: rgba(20, 22, 35, 0.95);
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        z-index: 10;
+    }
+
+    /* Alerts */
+    .alert {
+        border-radius: 8px;
+    }
+
+    .alert-success {
+        background: rgba(34, 197, 94, 0.2);
+        border-color: rgba(34, 197, 94, 0.3);
+        color: #4ade80;
+    }
+
+    .alert-warning {
+        background: rgba(234, 179, 8, 0.2);
+        border-color: rgba(234, 179, 8, 0.3);
+        color: #facc15;
+    }
+
+    .alert-info {
+        background: rgba(59, 130, 246, 0.2);
+        border-color: rgba(59, 130, 246, 0.3);
+        color: #60a5fa;
+    }
+
+    .alert-danger {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #f87171;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .settings-wrapper {
+            padding: 0;
+        }
+
+        .settings-container {
+            flex-direction: column;
+            height: 100%;
+            border-radius: 0;
+            max-width: 100%;
+        }
+
+        .settings-sidebar {
+            width: 100%;
+            height: auto;
+            flex-direction: row;
+            overflow-x: auto;
+            padding: 1rem;
+            align-items: center;
+            flex-wrap: nowrap;
+        }
+
+        .sidebar-title {
+            margin-bottom: 0;
+            margin-right: 1rem;
+            font-size: 1.2rem;
+            white-space: nowrap;
+        }
+
+        .nav-pills {
+            flex-direction: row !important;
+            flex-wrap: nowrap;
+        }
+
+        .nav-pills .nav-link {
+            white-space: nowrap;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+        }
+
+        .nav-pills .nav-link.deprecated-tab {
+            border-top: none;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            margin-top: 0;
+            margin-left: 1rem;
+            padding-top: 0.5rem;
+            padding-left: 0.75rem;
+        }
+
+        .sidebar-footer {
+            display: none;
+        }
+
+        .setting-item {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .setting-header {
+            padding-right: 0;
+        }
+
+        .setting-control {
+            width: 100%;
+        }
+
+        .settings-content-area {
+            padding: 1rem;
+        }
+
+        .save-bar {
+            margin: 1rem -1rem -1rem -1rem;
+            padding: 1rem;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+    // Mark as ready immediately (settings page doesn't use main.js which normally does this)
+    document.documentElement.classList.add('js-ready');
+    document.documentElement.classList.add('js-init-complete');
+    
+    // List widget functions
+    function addTag(key) {
+        const input = document.getElementById('input-' + key);
+        const value = input.value.trim();
+        if (!value) return;
+
+        const container = document.getElementById('tags-' + key);
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.innerHTML = value + '<button type="button" class="tag-remove" onclick="removeTag(this)">&times;</button>';
+        container.appendChild(tag);
+
+        input.value = '';
+        updateHiddenInput(key);
+    }
+
+    function removeTag(button) {
+        const tag = button.parentElement;
+        const container = tag.parentElement;
+        const key = container.id.replace('tags-', '');
+        tag.remove();
+        updateHiddenInput(key);
+    }
+
+    function updateHiddenInput(key) {
+        const container = document.getElementById('tags-' + key);
+        const tags = container.querySelectorAll('.tag');
+        const values = Array.from(tags).map(tag => {
+            // More robust: get all text content except the button
+            const button = tag.querySelector('.tag-remove');
+            const buttonText = button ? button.textContent : '';
+            return tag.textContent.replace(buttonText, '').trim();
+        });
+        document.getElementById('hidden-' + key).value = JSON.stringify(values);
+    }
+
+    // Slider <-> Input sync functions
+    function syncSliderToInput(key, value) {
+        const input = document.getElementById('input-' + key);
+        if (input) input.value = value;
+    }
+
+    function syncInputToSlider(key, value) {
+        const slider = document.getElementById(key);
+        if (slider) {
+            // Clamp value to valid range
+            let val = parseFloat(value);
+            const min = parseFloat(slider.min);
+            const max = parseFloat(slider.max);
+            if (isNaN(val)) val = min;
+            val = Math.max(min, Math.min(max, val));
+            slider.value = val;
+            // Also update input to show clamped value
+            const input = document.getElementById('input-' + key);
+            if (input) input.value = val;
+        }
+    }
+
+    // Quick-add for blocklist dropdown (prevents duplicates)
+    function quickAddTag(key, value) {
+        if (!value) return;
+        const container = document.getElementById('tags-' + key);
+        // Check if already exists
+        const existing = Array.from(container.querySelectorAll('.tag')).map(t => 
+            t.textContent.replace('×', '').trim().toLowerCase()
+        );
+        if (existing.includes(value.toLowerCase())) return;
+        
+        // Add tag using same pattern as addTag()
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.innerHTML = value + '<button type="button" class="tag-remove" onclick="removeTag(this)">×</button>';
+        container.appendChild(tag);
+        updateHiddenInput(key);
+    }
+
+    // Legacy function kept for backwards compatibility
+    function updateSliderDisplay(key, value) {
+        const el = document.getElementById('val-' + key);
+        if (el) el.textContent = value + 's';
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        // Initialize tooltips
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
+
+        // Sync all list widget hidden inputs on page load
+        // This ensures the hidden inputs match the displayed tags, fixing save issues
+        document.querySelectorAll('.tag-container').forEach(container => {
+            const key = container.id.replace('tags-', '');
+            if (key) updateHiddenInput(key);
+        });
+
+        // Show restart notice if any setting that requires restart is changed
+        const restartInputs = document.querySelectorAll('.needs-restart input, .needs-restart select');
+        const restartNotice = document.getElementById('restart-notice');
+
+        restartInputs.forEach(input => {
+            input.addEventListener('change', () => {
+                restartNotice.style.display = 'block';
+            });
+        });
+
+        // Handle checkbox values properly
+        document.getElementById('settingsForm').addEventListener('submit', function (e) {
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                if (!checkbox.checked) {
+                    const hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = checkbox.name;
+                    hidden.value = 'false';
+                    checkbox.parentNode.appendChild(hidden);
+                }
+            });
+        });
+
+        // Auto-dismiss alerts after 5 seconds
+        const alerts = document.querySelectorAll('.alert');
+        alerts.forEach(alert => {
+            setTimeout(() => {
+                alert.classList.remove('show');
+                setTimeout(() => alert.remove(), 150);
+            }, 5000);
+        });
+        // Track if form has unsaved changes
+        let formDirty = false;
+        const settingsForm = document.getElementById('settingsForm');
+        if (settingsForm) {
+            settingsForm.addEventListener('input', () => { formDirty = true; });
+            settingsForm.addEventListener('change', () => { formDirty = true; });
+        }
+
+        // Click outside settings container to close
+        const settingsWrapper = document.querySelector('.settings-wrapper');
+        const settingsContainer = document.querySelector('.settings-container');
+        if (settingsWrapper && settingsContainer) {
+            settingsWrapper.addEventListener('click', function (e) {
+                // Only close if clicking directly on the wrapper (backdrop), not its children
+                if (e.target === settingsWrapper) {
+                    if (formDirty) {
+                        if (confirm('You have unsaved changes. Discard and close?')) {
+                            history.back();
+                        }
+                    } else {
+                        history.back();
+                    }
+                }
+            });
+        }
+    });
+</script>
+<script>
+    // Apply font settings to settings page
+    (async function applyFontSettings() {
+        try {
+            const response = await fetch('/config');
+            const config = await response.json();
+            const systemFontStack = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif";
+            
+            // Apply UI font to settings page
+            if (config.uiFontFamily && config.uiFontFamily !== 'System Default') {
+                document.documentElement.style.setProperty('--ui-font-family', `'${config.uiFontFamily}', ${systemFontStack}`);
+            }
+            
+            // Get saved values from config (not from DOM which may be wrong)
+            const savedLyricsFont = config.lyricsFontFamily;
+            const savedUiFont = config.uiFontFamily;
+            
+            // Populate custom fonts in dropdowns BEFORE setting values
+            if (config.customFonts && config.customFonts.length > 0) {
+                const fontSelects = [
+                    { elem: document.querySelector('select[name="lyrics.font_family"]'), savedValue: savedLyricsFont },
+                    { elem: document.querySelector('select[name="ui.font_family"]'), savedValue: savedUiFont }
+                ];
+                
+                fontSelects.forEach(({ elem: select, savedValue }) => {
+                    if (!select) return;
+                    if (select.querySelector('optgroup[label="— Custom Fonts —"]')) return;
+                    
+                    const optgroup = document.createElement('optgroup');
+                    optgroup.label = '— Custom Fonts —';
+                    config.customFonts.forEach(fontName => {
+                        const option = document.createElement('option');
+                        option.value = fontName;
+                        option.textContent = fontName;
+                        optgroup.appendChild(option);
+                    });
+                    select.appendChild(optgroup);
+                    
+                    // Now set the correct value from config
+                    if (savedValue && savedValue !== 'System Default') {
+                        select.value = savedValue;
+                    }
+                });
+            }
+            
+            // Helper to create font preview
+            function createFontPreview(select, previewId) {
+                if (!select) return;
+                
+                const previewDiv = document.createElement('div');
+                previewDiv.id = previewId;
+                previewDiv.style.cssText = 'margin-top: 8px; padding: 12px 16px; background: rgba(255,255,255,0.05); border-radius: 8px; font-size: 1.1rem; line-height: 1.4;';
+                previewDiv.textContent = 'The quick brown fox jumps over the lazy dog';
+                
+                function updatePreview() {
+                    const font = select.value;
+                    if (font && font !== 'System Default') {
+                        previewDiv.style.fontFamily = `'${font}', sans-serif`;
+                    } else {
+                        previewDiv.style.fontFamily = 'inherit';
+                    }
+                }
+                
+                const formGroup = select.closest('.mb-3') || select.parentElement;
+                formGroup.appendChild(previewDiv);
+                
+                updatePreview();
+                select.addEventListener('change', updatePreview);
+            }
+            
+            // Add preview for both lyrics and UI font
+            createFontPreview(document.querySelector('select[name="lyrics.font_family"]'), 'lyrics-font-preview');
+            createFontPreview(document.querySelector('select[name="ui.font_family"]'), 'ui-font-preview');
+            
+        } catch (e) {
+            console.warn('Could not load font config:', e);
+        }
+    })();
+</script>
+{% endblock %}

@@ -1,0 +1,140 @@
+# Project specific
+current_wallpaper.png
+state.json
+sync_lyrics.build/
+sync_lyrics.dist/
+sync_lyrics.onefile-build/
+sync_lyrics.bin
+sync_lyrics.exe
+build_final/
+build_output/
+Unused/
+tests/
+full_project_code.txt
+features.md
+.kiro
+backups
+certs/
+spicetify_database
+homeassistant-addons/
+.claude
+backups/
+.agent/
+
+# share_project.py
+.cursor
+resources/fonts/custom
+.spotify-react-web-client-source-code
+album_art_database
+local_fingerprint_database
+# sfp-cli/
+*/sfp-cli/obj/
+*/sfp-cli/bin/
+*/sfp-cli/OLD/
+*/sfp-cli/FFmpeg/
+
+# resources/images/icon.ico
+lyrics_database/
+cache/
+logs/
+config_backups/
+data/
+verification_result.txt
+
+# Notes
+Notes.txt
+Notes2.txt
+Notes
+Notes2
+cache
+.cache
+config_backups/
+data/
+# screenshots/
+
+verification_result.txt
+
+# Environment Variables
+.env
+.env.*
+!.env.example
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+.cursorignore
+
+# Python
+.pytest_cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+SPOTIFY_RATE_LIMITING_ANALYSIS.md
+SAFE_OPTIMIZATION_PLAN.md
+WINDOWS_MEDIA_OPTIMIZATION.md
+SPOTIFY_ONLY_LATENCY_REDUCTION_PLAN.md
+ha_addon/DISTRIBUTION_GUIDE.md
+ha_addon/DEPLOY_INSTRUCTIONS.md
+nuke_branches.ps1
+run_synclyrics_hidden.vbs
+stable checkpoint after bug fixing full_project_code.txt
+.cache old
+notes.md
+ANALYSIS_SUMMARY.md
+ANALYSIS_AND_PLAN.md
+FINAL_ANALYSIS.md
+ISSUE_EVALUATION.md
+FIXES_APPLIED.md
+ALBUM_ART_FLICKERING_FIX_EVALUATION.md
+FEEDBACK_EVALUATION.md
+PROPOSED_FIXES.md
+
+Reaper DAW
+system_utils_diff.patch
+system_utils - new (broken).txt
+AI Docs
+/AI Docs
+diff_output.txt
+system_utils_backup.py
+system_utils old.py
+.agent/workflows/codebase-guide.md
+resources/js/lyrics.js.bak
+resources/js/lyrics OLD.js
+run - Reaper.bat
+certs/server.crt
+certs/server.key
+test_results
+test_shazam_metadata.py
+test_spotify_isrc.py
+run - Reaper.bat
+certs/server.key
+certs/server.crt
+device_test_output.txt
+test_device_enumeration.py
+check_devices.py
+run - Reaper.bat
+certs/server.crt
+certs/server.key
+spicylyrics full_project_code.txt
+.cache backup

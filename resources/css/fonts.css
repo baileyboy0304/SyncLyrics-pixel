@@ -1,0 +1,112 @@
+/* ========== BUNDLED FONTS ========== */
+/* Auto-generated from downloaded font files */
+
+/* Inter */
+@font-face { font-family: 'Inter'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/inter/inter-v20-latin-300.woff2') format('woff2'), url('/fonts/bundled/inter/inter-v20-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/inter/inter-v20-latin-500.woff2') format('woff2'), url('/fonts/bundled/inter/inter-v20-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/inter/inter-v20-latin-600.woff2') format('woff2'), url('/fonts/bundled/inter/inter-v20-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/inter/inter-v20-latin-700.woff2') format('woff2'), url('/fonts/bundled/inter/inter-v20-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Inter'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/inter/inter-v20-latin-regular.woff2') format('woff2'), url('/fonts/bundled/inter/inter-v20-latin-regular.woff') format('woff'); }
+
+/* Outfit */
+@font-face { font-family: 'Outfit'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/outfit/outfit-v15-latin-300.woff2') format('woff2'), url('/fonts/bundled/outfit/outfit-v15-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Outfit'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/outfit/outfit-v15-latin-500.woff2') format('woff2'), url('/fonts/bundled/outfit/outfit-v15-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Outfit'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/outfit/outfit-v15-latin-600.woff2') format('woff2'), url('/fonts/bundled/outfit/outfit-v15-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Outfit'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/outfit/outfit-v15-latin-700.woff2') format('woff2'), url('/fonts/bundled/outfit/outfit-v15-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Outfit'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/outfit/outfit-v15-latin-regular.woff2') format('woff2'), url('/fonts/bundled/outfit/outfit-v15-latin-regular.woff') format('woff'); }
+
+/* Poppins */
+@font-face { font-family: 'Poppins'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/poppins/poppins-v24-latin-300.woff2') format('woff2'), url('/fonts/bundled/poppins/poppins-v24-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Poppins'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/poppins/poppins-v24-latin-500.woff2') format('woff2'), url('/fonts/bundled/poppins/poppins-v24-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Poppins'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/poppins/poppins-v24-latin-600.woff2') format('woff2'), url('/fonts/bundled/poppins/poppins-v24-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Poppins'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/poppins/poppins-v24-latin-700.woff2') format('woff2'), url('/fonts/bundled/poppins/poppins-v24-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Poppins'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/poppins/poppins-v24-latin-regular.woff2') format('woff2'), url('/fonts/bundled/poppins/poppins-v24-latin-regular.woff') format('woff'); }
+
+/* Open Sans */
+@font-face { font-family: 'Open Sans'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/opensans/open-sans-v44-latin-300.woff2') format('woff2'), url('/fonts/bundled/opensans/open-sans-v44-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Open Sans'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/opensans/open-sans-v44-latin-500.woff2') format('woff2'), url('/fonts/bundled/opensans/open-sans-v44-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Open Sans'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/opensans/open-sans-v44-latin-600.woff2') format('woff2'), url('/fonts/bundled/opensans/open-sans-v44-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Open Sans'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/opensans/open-sans-v44-latin-700.woff2') format('woff2'), url('/fonts/bundled/opensans/open-sans-v44-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Open Sans'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/opensans/open-sans-v44-latin-regular.woff2') format('woff2'), url('/fonts/bundled/opensans/open-sans-v44-latin-regular.woff') format('woff'); }
+
+/* Nunito */
+@font-face { font-family: 'Nunito'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/nunito/nunito-v32-latin-300.woff2') format('woff2'), url('/fonts/bundled/nunito/nunito-v32-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Nunito'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/nunito/nunito-v32-latin-500.woff2') format('woff2'), url('/fonts/bundled/nunito/nunito-v32-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Nunito'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/nunito/nunito-v32-latin-600.woff2') format('woff2'), url('/fonts/bundled/nunito/nunito-v32-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Nunito'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/nunito/nunito-v32-latin-700.woff2') format('woff2'), url('/fonts/bundled/nunito/nunito-v32-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Nunito'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/nunito/nunito-v32-latin-regular.woff2') format('woff2'), url('/fonts/bundled/nunito/nunito-v32-latin-regular.woff') format('woff'); }
+
+/* Roboto */
+@font-face { font-family: 'Roboto'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/roboto/roboto-v50-latin-300.woff2') format('woff2'), url('/fonts/bundled/roboto/roboto-v50-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Roboto'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/roboto/roboto-v50-latin-500.woff2') format('woff2'), url('/fonts/bundled/roboto/roboto-v50-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Roboto'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/roboto/roboto-v50-latin-600.woff2') format('woff2'), url('/fonts/bundled/roboto/roboto-v50-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Roboto'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/roboto/roboto-v50-latin-700.woff2') format('woff2'), url('/fonts/bundled/roboto/roboto-v50-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Roboto'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/roboto/roboto-v50-latin-regular.woff2') format('woff2'), url('/fonts/bundled/roboto/roboto-v50-latin-regular.woff') format('woff'); }
+
+/* Montserrat */
+@font-face { font-family: 'Montserrat'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/montserrat/montserrat-v31-latin-300.woff2') format('woff2'), url('/fonts/bundled/montserrat/montserrat-v31-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Montserrat'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/montserrat/montserrat-v31-latin-500.woff2') format('woff2'), url('/fonts/bundled/montserrat/montserrat-v31-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Montserrat'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/montserrat/montserrat-v31-latin-600.woff2') format('woff2'), url('/fonts/bundled/montserrat/montserrat-v31-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Montserrat'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/montserrat/montserrat-v31-latin-700.woff2') format('woff2'), url('/fonts/bundled/montserrat/montserrat-v31-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Montserrat'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/montserrat/montserrat-v31-latin-regular.woff2') format('woff2'), url('/fonts/bundled/montserrat/montserrat-v31-latin-regular.woff') format('woff'); }
+
+/* Work Sans */
+@font-face { font-family: 'Work Sans'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/worksans/work-sans-v24-latin-300.woff2') format('woff2'), url('/fonts/bundled/worksans/work-sans-v24-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Work Sans'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/worksans/work-sans-v24-latin-500.woff2') format('woff2'), url('/fonts/bundled/worksans/work-sans-v24-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Work Sans'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/worksans/work-sans-v24-latin-600.woff2') format('woff2'), url('/fonts/bundled/worksans/work-sans-v24-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Work Sans'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/worksans/work-sans-v24-latin-700.woff2') format('woff2'), url('/fonts/bundled/worksans/work-sans-v24-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Work Sans'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/worksans/work-sans-v24-latin-regular.woff2') format('woff2'), url('/fonts/bundled/worksans/work-sans-v24-latin-regular.woff') format('woff'); }
+
+/* Oswald */
+@font-face { font-family: 'Oswald'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/oswald/oswald-v57-latin-300.woff2') format('woff2'), url('/fonts/bundled/oswald/oswald-v57-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Oswald'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/oswald/oswald-v57-latin-500.woff2') format('woff2'), url('/fonts/bundled/oswald/oswald-v57-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Oswald'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/oswald/oswald-v57-latin-600.woff2') format('woff2'), url('/fonts/bundled/oswald/oswald-v57-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Oswald'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/oswald/oswald-v57-latin-700.woff2') format('woff2'), url('/fonts/bundled/oswald/oswald-v57-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Oswald'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/oswald/oswald-v57-latin-regular.woff2') format('woff2'), url('/fonts/bundled/oswald/oswald-v57-latin-regular.woff') format('woff'); }
+
+/* Raleway */
+@font-face { font-family: 'Raleway'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/raleway/raleway-v37-latin-300.woff2') format('woff2'), url('/fonts/bundled/raleway/raleway-v37-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Raleway'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/raleway/raleway-v37-latin-500.woff2') format('woff2'), url('/fonts/bundled/raleway/raleway-v37-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Raleway'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/raleway/raleway-v37-latin-600.woff2') format('woff2'), url('/fonts/bundled/raleway/raleway-v37-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Raleway'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/raleway/raleway-v37-latin-700.woff2') format('woff2'), url('/fonts/bundled/raleway/raleway-v37-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Raleway'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/raleway/raleway-v37-latin-regular.woff2') format('woff2'), url('/fonts/bundled/raleway/raleway-v37-latin-regular.woff') format('woff'); }
+
+/* Bebas Neue */
+@font-face { font-family: 'Bebas Neue'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/bebasneue/bebas-neue-v16-latin-regular.woff2') format('woff2'), url('/fonts/bundled/bebasneue/bebas-neue-v16-latin-regular.woff') format('woff'); }
+
+/* Space Grotesk */
+@font-face { font-family: 'Space Grotesk'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-300.woff2') format('woff2'), url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-500.woff2') format('woff2'), url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-600.woff2') format('woff2'), url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-700.woff2') format('woff2'), url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-regular.woff2') format('woff2'), url('/fonts/bundled/spacegrotesk/space-grotesk-v22-latin-regular.woff') format('woff'); }
+
+/* Playfair Display */
+@font-face { font-family: 'Playfair Display'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-500.woff2') format('woff2'), url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Playfair Display'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-600.woff2') format('woff2'), url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Playfair Display'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-700.woff2') format('woff2'), url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Playfair Display'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-regular.woff2') format('woff2'), url('/fonts/bundled/playfairdisplay/playfair-display-v40-latin-regular.woff') format('woff'); }
+
+/* Lora */
+@font-face { font-family: 'Lora'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/lora/lora-v37-latin-500.woff2') format('woff2'), url('/fonts/bundled/lora/lora-v37-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Lora'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/lora/lora-v37-latin-600.woff2') format('woff2'), url('/fonts/bundled/lora/lora-v37-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Lora'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/lora/lora-v37-latin-700.woff2') format('woff2'), url('/fonts/bundled/lora/lora-v37-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Lora'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/lora/lora-v37-latin-regular.woff2') format('woff2'), url('/fonts/bundled/lora/lora-v37-latin-regular.woff') format('woff'); }
+
+/* Fraunces */
+@font-face { font-family: 'Fraunces'; font-weight: 300; font-display: swap; src: url('/fonts/bundled/fraunces/fraunces-v38-latin-300.woff2') format('woff2'), url('/fonts/bundled/fraunces/fraunces-v38-latin-300.woff') format('woff'); }
+@font-face { font-family: 'Fraunces'; font-weight: 500; font-display: swap; src: url('/fonts/bundled/fraunces/fraunces-v38-latin-500.woff2') format('woff2'), url('/fonts/bundled/fraunces/fraunces-v38-latin-500.woff') format('woff'); }
+@font-face { font-family: 'Fraunces'; font-weight: 600; font-display: swap; src: url('/fonts/bundled/fraunces/fraunces-v38-latin-600.woff2') format('woff2'), url('/fonts/bundled/fraunces/fraunces-v38-latin-600.woff') format('woff'); }
+@font-face { font-family: 'Fraunces'; font-weight: 700; font-display: swap; src: url('/fonts/bundled/fraunces/fraunces-v38-latin-700.woff2') format('woff2'), url('/fonts/bundled/fraunces/fraunces-v38-latin-700.woff') format('woff'); }
+@font-face { font-family: 'Fraunces'; font-weight: 400; font-display: swap; src: url('/fonts/bundled/fraunces/fraunces-v38-latin-regular.woff2') format('woff2'), url('/fonts/bundled/fraunces/fraunces-v38-latin-regular.woff') format('woff'); }
+
+/* ========== CSS VARIABLES FOR FONTS & STYLING ========== */
+:root {
+    --system-font-stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --ui-font-family: var(--system-font-stack);
+    --lyrics-font-family: var(--system-font-stack);
+    --lyrics-glow-intensity: 1;
+    --lyrics-text-color: #ffffff;
+    --lyrics-font-weight: 400;
+    --lyrics-font-weight-current: 500;
+}

@@ -1,0 +1,23 @@
+# Enforce LF for all text files in THIS project only
+* text=auto eol=lf
+
+# Optional: Explicitly mark binary files (prevents them being converted)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.exe binary
+*.dll binary
+*.so binary
+
+# Keep Windows batch files as CRLF (if you have any)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
+
+# Treat font files as binary (prevents diff clutter)
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
