@@ -150,7 +150,7 @@ class SettingsManager:
             "lyrics.display.musixmatch_word_sync_offset": Setting("Musixmatch Offset", float, -0.1, False, "Lyrics", "Musixmatch word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
             "lyrics.display.netease_word_sync_offset": Setting("NetEase Offset", float, -0.1, False, "Lyrics", "NetEase word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
             "lyrics.display.word_sync_transition_ms": Setting("Word-Sync Transition", int, 200, False, "Lyrics", "Total line transition animation in word-sync (ms). 0=instant, 200-400=smooth.", "slider", min_val=0, max_val=800),
-            "lyrics.display.pixel_scroll_enabled": Setting("Pixel Scroll", bool, False, True, "Lyrics", "Enable continuous smooth pixel-scroll line transitions", "switch"),
+            "lyrics.display.pixel_scroll_enabled": Setting("Pixel Scroll", bool, False, False, "Lyrics", "Enable continuous smooth pixel-scroll line transitions", "switch"),
             "lyrics.display.pixel_scroll_speed": Setting("Pixel Scroll Speed", float, 1.0, False, "Lyrics", "Scroll speed multiplier (0.3 = slower / 1.0 = default / 3.0 = faster)", "slider", min_val=0.3, max_val=3.0),
             "lyrics.display.idle_wait_time": Setting("Idle Wait", float, 10.0, False, "Lyrics", "Time before idle (s)", "slider", min_val=1.0, max_val=30.0),
             "lyrics.display.smart_race_timeout": Setting("Race Timeout", float, 4.0, False, "Lyrics", "Provider race timeout (s)", "slider", min_val=1.0, max_val=10.0),

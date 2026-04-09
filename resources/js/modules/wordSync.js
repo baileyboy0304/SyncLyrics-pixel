@@ -1175,7 +1175,10 @@ function updateFullListDOM(lines, position, style) {
 
     // Pre-grow the upcoming line shortly before it becomes active so the
     // next->current transition feels smooth instead of jumping in size.
-    const anticipationMs = Math.max(80, Math.min(600, wordSyncTransitionMs || 200));
+    // Start earlier and allow a longer easing window so the upcoming line
+    // zoom feels smoother and more pronounced before it becomes current.
+    const baseTransitionMs = Math.max(120, wordSyncTransitionMs || 200);
+    const anticipationMs = Math.max(250, Math.min(1400, baseTransitionMs * 2.5));
     let shouldAnticipateNext = false;
     if (activeIdx >= 0 && activeIdx + 1 < lines.length) {
         const nextStart = lines[activeIdx + 1]?.start;

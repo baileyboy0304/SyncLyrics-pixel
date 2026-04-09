@@ -202,8 +202,9 @@ body {
 .next.line-anticipating-current {
     font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
     opacity: 1;
-    transform: scale(1.02);
+    transform: scale(1.04);
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
+    transition: all 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* ========== ANIMATIONS ========== */
