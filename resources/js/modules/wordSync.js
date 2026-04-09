@@ -40,6 +40,7 @@ import {
     debugBadSamples,
     instrumentalMarkers,
     wordSyncTransitionMs,
+    pixelScrollEnabled,
     pixelScrollSpeed
 } from './state.js';
 
@@ -1172,6 +1173,21 @@ function updateFullListDOM(lines, position, style) {
     if (position < (lines[0].start || 0)) activeIdx = -1;
     if (position >= (lines[lines.length - 1].start || 0) + 10) activeIdx = lines.length - 1;
 
+    // Pre-grow the upcoming line shortly before it becomes active so the
+    // next->current transition feels smooth instead of jumping in size.
+    // Start earlier and allow a longer easing window so the upcoming line
+    // zoom feels smoother and more pronounced before it becomes current.
+    const baseTransitionMs = Math.max(120, wordSyncTransitionMs || 200);
+    const anticipationMs = Math.max(250, Math.min(1400, baseTransitionMs * 2.5));
+    let shouldAnticipateNext = false;
+    if (activeIdx >= 0 && activeIdx + 1 < lines.length) {
+        const nextStart = lines[activeIdx + 1]?.start;
+        if (typeof nextStart === 'number') {
+            const timeToNextMs = (nextStart - position) * 1000;
+            shouldAnticipateNext = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
+        }
+    }
+
     lines.forEach((_, i) => {
         const el = document.getElementById(`ps-line-${i}`);
         if (!el) return;
@@ -1187,6 +1203,9 @@ function updateFullListDOM(lines, position, style) {
             el.classList.add('previous');
         } else if (i === activeIdx + 1) {
             el.classList.add('next');
+            if (shouldAnticipateNext) {
+                el.classList.add('line-anticipating-current');
+            }
         } else if (i === activeIdx - 2) {
             el.classList.add('far-previous');
         } else {
@@ -1395,7 +1414,7 @@ function animateWordSync(timestamp) {
         return;
     }
     
-    const isPixelScroll = document.getElementById('opt-pixel-scroll')?.checked || false;
+    const isPixelScroll = !!pixelScrollEnabled;
 
     // Toggle DOM architecture dynamically
     const trackSignature = wordSyncedLyrics[0] ? wordSyncedLyrics[0].start : 'empty';

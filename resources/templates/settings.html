@@ -147,6 +147,7 @@
                                     </div>
                                     {% elif setting.widget_type == "number" %}
                                     <input type="number" class="form-control" id="{{ key }}" name="{{ key }}"
+                                        step="{% if setting.type == 'int' %}1{% else %}any{% endif %}"
                                         value="{{ setting.value if setting.value is not none else '' }}" {% if
                                         setting.min_val is not none %}min="{{ setting.min_val }}" {% endif %} {% if
                                         setting.max_val is not none %}max="{{ setting.max_val }}" {% endif %}>
@@ -225,6 +226,7 @@
                                         <div class="setting-control">
                                             {% if setting.widget_type == "number" %}
                                             <input type="number" class="form-control" id="{{ key }}" name="{{ key }}"
+                                                step="{% if setting.type == 'int' %}1{% else %}any{% endif %}"
                                                 value="{{ setting.value if setting.value is not none else '' }}" {% if
                                                 setting.min_val is not none %}min="{{ setting.min_val }}" {% endif %} {%
                                                 if setting.max_val is not none %}max="{{ setting.max_val }}" {% endif
