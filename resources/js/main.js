@@ -45,7 +45,7 @@ import { normalizeTrackId, sleep, areLyricsDifferent } from './modules/utils.js'
 import { getConfig, getCurrentTrack, getLyrics, fetchArtistImages, fetchQueue } from './modules/api.js';
 
 // DOM (Level 1)
-import { setLyricsInDom, updateThemeColor } from './modules/dom.js';
+import { setLyricsInDom, updateThemeColor, updateLineSyncAnticipation } from './modules/dom.js';
 
 // Settings (Level 2)
 import { initializeDisplay, toggleMinimalMode } from './modules/settings.js';
@@ -688,6 +688,9 @@ async function updateLoop() {
         } else if (data && typeof data === 'object') {
             setLyricsInDom(data);
         }
+
+        // Line-sync anticipation updates every poll tick (even when text hasn't changed)
+        updateLineSyncAnticipation(data?.line_sync_timing || null);
 
         // Check for visual mode
         checkForVisualMode(data, trackId);

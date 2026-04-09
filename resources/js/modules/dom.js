@@ -20,6 +20,12 @@ import { areLyricsDifferent } from './utils.js';
 import { animatePixelScroll } from './pixelScroll.js';
 // Note: Word-sync imports removed - animation loop is now single authority for lyrics during word-sync
 
+// Line-sync continuous pixel-scroll state
+let lineSyncContinuousScrollActive = false;
+let lineSyncTimingAnchor = null;
+let lineSyncAnchorPerfTs = 0;
+let lineSyncRafId = null;
+
 // ========== ELEMENT CACHE ==========
 // Cache for frequently accessed elements
 const elementCache = new Map();
@@ -109,10 +115,20 @@ export function setLyricsInDom(lyrics) {
     // Seeks and jumps fall back to the instant update so the display never stalls.
     const pixelScrollActive = document.getElementById('lyrics')
         ?.classList.contains('pixel-scroll-mode');
-    if (pixelScrollActive && (isForward || isBackward)) {
+    if (pixelScrollActive && (isForward || isBackward) && !lineSyncContinuousScrollActive) {
         animatePixelScroll(applyUpdate, isForward);
     } else {
         applyUpdate();
+        // In continuous line-sync mode, each poll frame controls transform directly.
+        // After a line boundary update, hard-reset transform so the new text window
+        // starts from the top of the next interval without visual drift.
+        if (lineSyncContinuousScrollActive) {
+            const inner = document.getElementById('lyrics-scroll-inner');
+            if (inner) {
+                inner.style.transition = 'none';
+                inner.style.transform = 'translateY(0)';
+            }
+        }
     }
 
     // Self-healing: If we are showing lyrics and NOT in visual mode, ensure the hidden class is gone
@@ -127,6 +143,122 @@ export function setLyricsInDom(lyrics) {
     setTimeout(() => {
         setUpdateInProgress(false);
     }, 100);
+}
+
+/**
+ * Apply line-sync anticipation styling for upcoming line in pixel-scroll mode.
+ * This runs every poll tick (not only on lyric text changes) so the next line
+ * can smoothly grow before the line boundary.
+ *
+ * @param {Object|null} timing - line_sync_timing from /lyrics payload
+ */
+function stopLineSyncContinuousScroll(resetDom = true) {
+    lineSyncContinuousScrollActive = false;
+    lineSyncTimingAnchor = null;
+    lineSyncAnchorPerfTs = 0;
+    if (lineSyncRafId) {
+        cancelAnimationFrame(lineSyncRafId);
+        lineSyncRafId = null;
+    }
+
+    if (!resetDom) return;
+    const nextEl = document.getElementById('next-1');
+    const inner = document.getElementById('lyrics-scroll-inner');
+    if (nextEl) nextEl.classList.remove('line-anticipating-current');
+    if (inner) {
+        inner.style.transition = '';
+        inner.style.transform = '';
+    }
+}
+
+function renderLineSyncContinuousScroll() {
+    lineSyncRafId = null;
+    if (!lineSyncContinuousScrollActive || !lineSyncTimingAnchor) return;
+
+    const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
+    const inner = document.getElementById('lyrics-scroll-inner');
+    const lyricsEl = document.getElementById('lyrics');
+    if (!nextEl || !currentEl || !inner || !lyricsEl) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    if (hasWordSync && wordSyncEnabled) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    if (!lyricsEl.classList.contains('pixel-scroll-mode')) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    const now = performance.now();
+    const elapsedMs = Math.max(0, now - lineSyncAnchorPerfTs);
+    const durationMs = Math.max(1, lineSyncTimingAnchor.lineDurationMs || 1);
+    const anchorProgress = Math.max(0, Math.min(1, lineSyncTimingAnchor.lineProgress || 0));
+    const dynamicProgress = Math.max(0, Math.min(1, anchorProgress + (elapsedMs / durationMs)));
+
+    const currentRect = currentEl.getBoundingClientRect();
+    const nextRect = nextEl.getBoundingClientRect();
+    const offset = nextRect.top - currentRect.top;
+    if (Math.abs(offset) >= 1) {
+        const translateY = -(offset * dynamicProgress);
+        inner.style.transition = 'none';
+        inner.style.transform = `translateY(${translateY}px)`;
+    }
+
+    const timeToNextMs = Math.max(0, (lineSyncTimingAnchor.timeToNextMs || 0) - elapsedMs);
+    const anticipationMs = 900;
+    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
+    nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+
+    lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
+}
+
+export function updateLineSyncAnticipation(timing) {
+    const lyricsEl = document.getElementById('lyrics');
+    if (!lyricsEl) return;
+
+    // Do not interfere with word-sync renderer modes.
+    if (hasWordSync && wordSyncEnabled) {
+        // Stop line-sync RAF/state, but DO NOT reset shared inner transform here.
+        // Word-sync pixel renderer owns #lyrics-scroll-inner transform while active.
+        stopLineSyncContinuousScroll(false);
+        const nextEl = document.getElementById('next-1');
+        if (nextEl) nextEl.classList.remove('line-anticipating-current');
+        return;
+    }
+
+    const pixelScrollActive = lyricsEl.classList.contains('pixel-scroll-mode');
+    const lineProgress = timing?.line_progress;
+    const lineDurationMs = timing?.line_duration_ms;
+    const timeToNextMs = timing?.time_to_next_ms;
+    const canContinuousScroll = pixelScrollActive
+        && typeof lineProgress === 'number'
+        && typeof lineDurationMs === 'number'
+        && typeof timeToNextMs === 'number'
+        && lineDurationMs > 0
+        && lineProgress >= 0
+        && lineProgress <= 1;
+
+    if (!canContinuousScroll) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    lineSyncContinuousScrollActive = true;
+    lineSyncTimingAnchor = {
+        lineProgress,
+        lineDurationMs,
+        timeToNextMs
+    };
+    lineSyncAnchorPerfTs = performance.now();
+
+    if (!lineSyncRafId) {
+        lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
+    }
 }
 
 // ========== THEME COLOR ==========

@@ -277,7 +277,8 @@ async def lyrics() -> dict:
             "is_instrumental_manual": is_instrumental_manual,
             "word_synced_lyrics": None,
             "has_word_sync": False,
-            "word_sync_provider": None
+            "word_sync_provider": None,
+            "line_sync_timing": None
         }
     
     # Check if lyrics are actually empty or just [...]
@@ -366,6 +367,8 @@ async def lyrics() -> dict:
             _instrumental_markers_cache['key'] = cache_key
             _instrumental_markers_cache['markers'] = instrumental_markers
 
+    line_sync_timing = lyrics_module.get_line_sync_timing_context()
+
     return {
         "lyrics": list(lyrics_data),
         "colors": colors,
@@ -380,7 +383,9 @@ async def lyrics() -> dict:
         # Flag for toggle availability: true if ANY cached provider has word-sync
         "any_provider_has_word_sync": any_provider_has_word_sync,
         # Instrumental markers for gap detection (timestamps where ♪ appears in line-sync)
-        "instrumental_markers": instrumental_markers if instrumental_markers else None
+        "instrumental_markers": instrumental_markers if instrumental_markers else None,
+        # Line-sync timing context for frontend anticipation effects
+        "line_sync_timing": line_sync_timing
     }
 
 @app.route("/current-track")
