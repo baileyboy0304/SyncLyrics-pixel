@@ -150,6 +150,8 @@ class SettingsManager:
             "lyrics.display.musixmatch_word_sync_offset": Setting("Musixmatch Offset", float, -0.1, False, "Lyrics", "Musixmatch word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
             "lyrics.display.netease_word_sync_offset": Setting("NetEase Offset", float, -0.1, False, "Lyrics", "NetEase word-sync timing adjustment (s)", "slider", min_val=-10.0, max_val=10.0),
             "lyrics.display.word_sync_transition_ms": Setting("Word-Sync Transition", int, 200, False, "Lyrics", "Total line transition animation in word-sync (ms). 0=instant, 200-400=smooth.", "slider", min_val=0, max_val=800),
+            "lyrics.display.pixel_scroll_enabled": Setting("Pixel Scroll", bool, False, False, "Lyrics", "Enable continuous smooth pixel-scroll line transitions", "switch"),
+            "lyrics.display.pixel_scroll_speed": Setting("Pixel Scroll Speed", float, 1.0, False, "Lyrics", "Scroll speed multiplier (0.3 = slower / 1.0 = default / 3.0 = faster)", "slider", min_val=0.3, max_val=3.0),
             "lyrics.display.idle_wait_time": Setting("Idle Wait", float, 10.0, False, "Lyrics", "Time before idle (s)", "slider", min_val=1.0, max_val=30.0),
             "lyrics.display.smart_race_timeout": Setting("Race Timeout", float, 4.0, False, "Lyrics", "Provider race timeout (s)", "slider", min_val=1.0, max_val=10.0),
             "lyrics.display.font_size_current": Setting("Current Line Size", float, 1.0, False, "Lyrics", "Font scale for the active lyric line", "slider", min_val=0.7, max_val=1.5),
@@ -268,10 +270,6 @@ class SettingsManager:
             "system.music_assistant.player_id": Setting("MA Player ID", str, "", False, "Music Assistant", "Specific player (blank = auto-detect)", "text"),
             "system.music_assistant.paused_timeout": Setting("MA Paused Timeout", int, 600, False, "Music Assistant", "Accept paused MA for N seconds (0=forever)", "number"),
             "lyrics.display.music_assistant_latency_compensation": Setting("Music Assistant Latency", float, 0.0, False, "Lyrics", "Music Assistant sync (+early, -late)", "slider", min_val=-2.0, max_val=2.0),
-
-            # Pixel scroll — smooth physical slide animation for lyric transitions
-            "lyrics.display.pixel_scroll_enabled": Setting("Pixel Scroll", bool, False, False, "Lyrics", "Animate lyric transitions with a smooth pixel-level scroll instead of the default crossfade", "switch"),
-            "lyrics.display.pixel_scroll_speed": Setting("Pixel Scroll Speed", float, 1.0, False, "Lyrics", "Scroll animation speed (0.5 = slow / 1.0 = default / 2.0 = fast)", "slider", min_val=0.3, max_val=3.0),
 
             "spotify.redirect_uri": Setting("Redirect URI", str, "http://127.0.0.1:9012/callback", True, "Spotify API", "Callback URL"),
             "spotify.cache.metadata_ttl": Setting("Metadata TTL", float, 2.0, False, "Spotify API", "Metadata cache (s)", "number"),
