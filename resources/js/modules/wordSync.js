@@ -40,6 +40,7 @@ import {
     debugBadSamples,
     instrumentalMarkers,
     wordSyncTransitionMs,
+    pixelScrollEnabled,
     pixelScrollSpeed
 } from './state.js';
 
@@ -1395,7 +1396,7 @@ function animateWordSync(timestamp) {
         return;
     }
     
-    const isPixelScroll = document.getElementById('opt-pixel-scroll')?.checked || false;
+    const isPixelScroll = !!pixelScrollEnabled;
 
     // Toggle DOM architecture dynamically
     const trackSignature = wordSyncedLyrics[0] ? wordSyncedLyrics[0].start : 'empty';
