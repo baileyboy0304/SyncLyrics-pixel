@@ -1798,17 +1798,13 @@ async def _get_lyrics(artist: str, title: str, album: str = None, duration: int 
 # Helper Functions (Unchanged)
 # ==========================================
 
-def _find_current_lyric_index(delta: Optional[float] = None) -> int:
+def _get_compensated_position(delta: Optional[float] = None) -> Optional[float]:
     """
-    Returns index of current lyric line based on song position.
-    
-    Args:
-        delta: Optional manual override for latency compensation.
-               If None, reads from settings dynamically.
+    Returns playback position with source-specific latency compensation applied.
     """
-    if current_song_lyrics is None or current_song_data is None:
-        return -1
-    
+    if current_song_data is None:
+        return None
+
     # Read latency compensation dynamically from settings (allows hot-reload)
     # FIX: Previously used static LATENCY_COMPENSATION which didn't update on settings change
     general_latency = LYRICS.get("display", {}).get("latency_compensation", 0.0)
@@ -1840,25 +1836,42 @@ def _find_current_lyric_index(delta: Optional[float] = None) -> int:
     else:
         # Normal mode (Windows Media, hybrid): Use base delta
         adaptive_delta = base_delta
-    
+
     position = current_song_data.get("position", 0)
+    return position + adaptive_delta
+
+
+def _find_current_lyric_index(delta: Optional[float] = None) -> int:
+    """
+    Returns index of current lyric line based on song position.
+    
+    Args:
+        delta: Optional manual override for latency compensation.
+               If None, reads from settings dynamically.
+    """
+    if current_song_lyrics is None or current_song_data is None:
+        return -1
+    
+    compensated_position = _get_compensated_position(delta)
+    if compensated_position is None:
+        return -1
     
     # 1. Before first lyric
-    if position + adaptive_delta < current_song_lyrics[0][0]:
+    if compensated_position < current_song_lyrics[0][0]:
         return -2
         
     # 2. After last lyric
     last_lyric_time = current_song_lyrics[-1][0]
-    if position + adaptive_delta > last_lyric_time + 9.0: # End song after 9s
+    if compensated_position > last_lyric_time + 9.0: # End song after 9s
         return -3
     
     # 3. Find current line
     for i in range(len(current_song_lyrics) - 1):
-        if current_song_lyrics[i][0] <= position + adaptive_delta < current_song_lyrics[i + 1][0]:
+        if current_song_lyrics[i][0] <= compensated_position < current_song_lyrics[i + 1][0]:
             return i
             
     # 4. If we are at the very last line
-    if position + adaptive_delta >= last_lyric_time:
+    if compensated_position >= last_lyric_time:
         return len(current_song_lyrics) - 1
 
     return -1
@@ -1943,7 +1956,10 @@ def get_line_sync_timing_context() -> Optional[Dict[str, Any]]:
     try:
         current_start = float(current_song_lyrics[idx][0])
         next_start = float(current_song_lyrics[idx + 1][0])
-        position = float(current_song_data.get("position", 0.0))
+        compensated_position = _get_compensated_position()
+        if compensated_position is None:
+            return None
+        position = float(compensated_position)
     except (TypeError, ValueError, IndexError):
         return None
 

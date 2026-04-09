@@ -223,7 +223,11 @@ export function updateLineSyncAnticipation(timing) {
 
     // Do not interfere with word-sync renderer modes.
     if (hasWordSync && wordSyncEnabled) {
-        stopLineSyncContinuousScroll(true);
+        // Stop line-sync RAF/state, but DO NOT reset shared inner transform here.
+        // Word-sync pixel renderer owns #lyrics-scroll-inner transform while active.
+        stopLineSyncContinuousScroll(false);
+        const nextEl = document.getElementById('next-1');
+        if (nextEl) nextEl.classList.remove('line-anticipating-current');
         return;
     }
 
