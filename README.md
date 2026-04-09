@@ -1,4 +1,4 @@
-# SyncLyrics
+# SyncLyrics - with pixel scrolling
 
 A real-time synced lyrics server that can run on multiple platforms and serves beautiful lyrics to any device with a web-browser.
 
