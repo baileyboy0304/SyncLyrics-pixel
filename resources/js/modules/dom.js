@@ -22,6 +22,9 @@ import { animatePixelScroll } from './pixelScroll.js';
 
 // Line-sync continuous pixel-scroll state
 let lineSyncContinuousScrollActive = false;
+let lineSyncTimingAnchor = null;
+let lineSyncAnchorPerfTs = 0;
+let lineSyncRafId = null;
 
 // ========== ELEMENT CACHE ==========
 // Cache for frequently accessed elements
@@ -149,55 +152,109 @@ export function setLyricsInDom(lyrics) {
  *
  * @param {Object|null} timing - line_sync_timing from /lyrics payload
  */
-export function updateLineSyncAnticipation(timing) {
+function stopLineSyncContinuousScroll(resetDom = true) {
+    lineSyncContinuousScrollActive = false;
+    lineSyncTimingAnchor = null;
+    lineSyncAnchorPerfTs = 0;
+    if (lineSyncRafId) {
+        cancelAnimationFrame(lineSyncRafId);
+        lineSyncRafId = null;
+    }
+
+    if (!resetDom) return;
     const nextEl = document.getElementById('next-1');
-    const lyricsEl = document.getElementById('lyrics');
     const inner = document.getElementById('lyrics-scroll-inner');
+    if (nextEl) nextEl.classList.remove('line-anticipating-current');
+    if (inner) {
+        inner.style.transition = '';
+        inner.style.transform = '';
+    }
+}
+
+function renderLineSyncContinuousScroll() {
+    lineSyncRafId = null;
+    if (!lineSyncContinuousScrollActive || !lineSyncTimingAnchor) return;
+
+    const nextEl = document.getElementById('next-1');
     const currentEl = document.getElementById('current');
-    if (!nextEl || !lyricsEl || !inner || !currentEl) return;
+    const inner = document.getElementById('lyrics-scroll-inner');
+    const lyricsEl = document.getElementById('lyrics');
+    if (!nextEl || !currentEl || !inner || !lyricsEl) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    if (hasWordSync && wordSyncEnabled) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    if (!lyricsEl.classList.contains('pixel-scroll-mode')) {
+        stopLineSyncContinuousScroll(true);
+        return;
+    }
+
+    const now = performance.now();
+    const elapsedMs = Math.max(0, now - lineSyncAnchorPerfTs);
+    const durationMs = Math.max(1, lineSyncTimingAnchor.lineDurationMs || 1);
+    const anchorProgress = Math.max(0, Math.min(1, lineSyncTimingAnchor.lineProgress || 0));
+    const dynamicProgress = Math.max(0, Math.min(1, anchorProgress + (elapsedMs / durationMs)));
+
+    const currentRect = currentEl.getBoundingClientRect();
+    const nextRect = nextEl.getBoundingClientRect();
+    const offset = nextRect.top - currentRect.top;
+    if (Math.abs(offset) >= 1) {
+        const translateY = -(offset * dynamicProgress);
+        inner.style.transition = 'none';
+        inner.style.transform = `translateY(${translateY}px)`;
+    }
+
+    const timeToNextMs = Math.max(0, (lineSyncTimingAnchor.timeToNextMs || 0) - elapsedMs);
+    const anticipationMs = 900;
+    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
+    nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+
+    lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
+}
+
+export function updateLineSyncAnticipation(timing) {
+    const lyricsEl = document.getElementById('lyrics');
+    if (!lyricsEl) return;
 
     // Do not interfere with word-sync renderer modes.
     if (hasWordSync && wordSyncEnabled) {
-        nextEl.classList.remove('line-anticipating-current');
-        lineSyncContinuousScrollActive = false;
+        stopLineSyncContinuousScroll(true);
         return;
     }
 
     const pixelScrollActive = lyricsEl.classList.contains('pixel-scroll-mode');
-    const timeToNextMs = timing?.time_to_next_ms;
     const lineProgress = timing?.line_progress;
-
-    // Match the smoother anticipation window used in word-sync pixel mode.
-    const anticipationMs = 900;
-    const shouldAnticipate = pixelScrollActive
-        && typeof timeToNextMs === 'number'
-        && timeToNextMs >= 0
-        && timeToNextMs <= anticipationMs;
-
-    // Continuous pixel-scroll for line-sync mode:
-    // smoothly translate the full 6-line stack from current toward next as
-    // the line approaches its boundary.
+    const lineDurationMs = timing?.line_duration_ms;
+    const timeToNextMs = timing?.time_to_next_ms;
     const canContinuousScroll = pixelScrollActive
         && typeof lineProgress === 'number'
+        && typeof lineDurationMs === 'number'
+        && typeof timeToNextMs === 'number'
+        && lineDurationMs > 0
         && lineProgress >= 0
         && lineProgress <= 1;
 
-    lineSyncContinuousScrollActive = canContinuousScroll;
-    if (canContinuousScroll) {
-        const currentRect = currentEl.getBoundingClientRect();
-        const nextRect = nextEl.getBoundingClientRect();
-        const offset = nextRect.top - currentRect.top;
-        if (Math.abs(offset) >= 1) {
-            const translateY = -(offset * lineProgress);
-            inner.style.transition = 'none';
-            inner.style.transform = `translateY(${translateY}px)`;
-        }
-    } else {
-        inner.style.transition = '';
-        inner.style.transform = '';
+    if (!canContinuousScroll) {
+        stopLineSyncContinuousScroll(true);
+        return;
     }
 
-    nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    lineSyncContinuousScrollActive = true;
+    lineSyncTimingAnchor = {
+        lineProgress,
+        lineDurationMs,
+        timeToNextMs
+    };
+    lineSyncAnchorPerfTs = performance.now();
+
+    if (!lineSyncRafId) {
+        lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
+    }
 }
 
 // ========== THEME COLOR ==========
