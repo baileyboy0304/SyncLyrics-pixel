@@ -239,10 +239,7 @@ function renderLineSyncContinuousScroll() {
     const currentRect = currentEl.getBoundingClientRect();
     const nextRect = nextEl.getBoundingClientRect();
     const offset = nextRect.top - currentRect.top;
-    const lyricsRect = lyricsEl.getBoundingClientRect();
-    const containerCenter = lyricsRect.top + (lyricsRect.height / 2);
-    const currentCenter = currentRect.top + (currentRect.height / 2);
-    const centerCorrection = containerCenter - currentCenter;
+    const centerCorrection = Number(lineSyncTimingAnchor.centerCorrectionPx || 0);
     if (Math.abs(offset) >= 1) {
         // Keep the active line visually centered while it transitions to previous.
         // This removes the high/low drift caused by font-size/line-height changes.
@@ -328,8 +325,17 @@ export function updateLineSyncAnticipation(timing) {
     lineSyncTimingAnchor = {
         lineProgress,
         lineDurationMs,
-        timeToNextMs
+        timeToNextMs,
+        centerCorrectionPx: 0
     };
+    const currentEl = document.getElementById('current');
+    if (currentEl) {
+        const lyricsRect = lyricsEl.getBoundingClientRect();
+        const currentRect = currentEl.getBoundingClientRect();
+        const containerCenter = lyricsRect.top + (lyricsRect.height / 2);
+        const currentCenter = currentRect.top + (currentRect.height / 2);
+        lineSyncTimingAnchor.centerCorrectionPx = containerCenter - currentCenter;
+    }
     lineSyncAnchorPerfTs = performance.now();
     logLineSyncDebug('Anchor updated', {
         lineProgress: Number(lineProgress.toFixed(4)),
