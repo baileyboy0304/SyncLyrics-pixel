@@ -1132,7 +1132,9 @@ function buildFullListDOM() {
 
 function destroyFullListDOM() {
     const container = document.getElementById('lyrics');
-    if (container) container.classList.remove('pixel-scroll-mode');
+    // Keep pixel-scroll mode class when global line-sync pixel scrolling is enabled.
+    // Without this, exiting word-sync can disable line-mode pixel scroll silently.
+    if (container && !pixelScrollEnabled) container.classList.remove('pixel-scroll-mode');
 
     const inner = document.getElementById('lyrics-scroll-inner');
     if (inner) {

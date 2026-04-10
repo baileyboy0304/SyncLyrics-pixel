@@ -13,6 +13,7 @@ import {
     visualModeActive,
     hasWordSync,
     wordSyncEnabled,
+    pixelScrollEnabled,
     setLastLyrics,
     setUpdateInProgress
 } from './state.js';
@@ -259,6 +260,13 @@ function renderLineSyncContinuousScroll() {
 export function updateLineSyncAnticipation(timing) {
     const lyricsEl = document.getElementById('lyrics');
     if (!lyricsEl) return;
+
+    // Self-heal: keep the CSS mode class aligned with global setting.
+    // Word-sync transitions can temporarily rebuild/remove DOM and may desync class state.
+    if (pixelScrollEnabled && !lyricsEl.classList.contains('pixel-scroll-mode')) {
+        lyricsEl.classList.add('pixel-scroll-mode');
+        logLineSyncDebug('Recovered missing pixel-scroll-mode class from state');
+    }
 
     // Do not interfere with word-sync renderer modes.
     if (hasWordSync && wordSyncEnabled) {
