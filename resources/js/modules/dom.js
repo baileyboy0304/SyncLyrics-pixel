@@ -123,6 +123,9 @@ export function setLyricsInDom(lyrics) {
     setUpdateInProgress(true);
     setLastLyrics([...lyrics]);
 
+    const pixelScrollActive = document.getElementById('lyrics')
+        ?.classList.contains('pixel-scroll-mode');
+
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
         const previousEl = document.getElementById('prev-1');
@@ -169,7 +172,8 @@ export function setLyricsInDom(lyrics) {
         // giving the browser one frame to commit the "from" style.
         // Skip fallback demotion when outgoing anticipation was already active;
         // otherwise we get a second size-change pulse after the boundary.
-        const shouldDemote = (isForward || isBackward) && !hadOutgoingAnticipation;
+        const shouldDemote = (isForward || isBackward)
+            && !hadOutgoingAnticipation;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
@@ -187,8 +191,6 @@ export function setLyricsInDom(lyrics) {
     // The CSS class on #lyrics is the canonical on/off flag — works in both the
     // main app (set by api.js from server config) and the sandbox (set directly).
     // Seeks and jumps fall back to the instant update so the display never stalls.
-    const pixelScrollActive = document.getElementById('lyrics')
-        ?.classList.contains('pixel-scroll-mode');
     if (pixelScrollActive) {
         logLineSyncDebug('Lyrics window update', {
             isForward,
