@@ -150,16 +150,13 @@ export function setLyricsInDom(lyrics) {
         }
 
         // Smoothly shrink old active line into previous slot on step transitions.
-        // Double rAF ensures one paint occurs with the element at full (current) size
-        // before we remove the class — otherwise the CSS font-size transition never
-        // sees a "from" state and the line jumps straight to previous size.
+        // Single rAF keeps grow/shrink nearly concurrent at the boundary while still
+        // giving the browser one frame to commit the "from" style.
         const shouldDemote = isForward || isBackward;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    previousEl.classList.remove('line-demoting-from-current');
-                });
+                previousEl.classList.remove('line-demoting-from-current');
             });
             if (lineDemotionResetTimer) clearTimeout(lineDemotionResetTimer);
             lineDemotionResetTimer = setTimeout(() => {
@@ -267,8 +264,10 @@ function stopLineSyncContinuousScroll(resetDom = true, reason = 'unknown') {
 
     if (!resetDom) return;
     const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
     const inner = document.getElementById('lyrics-scroll-inner');
     if (nextEl) nextEl.classList.remove('line-anticipating-current');
+    if (currentEl) currentEl.classList.remove('line-anticipating-previous');
     if (inner) {
         inner.style.transition = '';
         inner.style.transform = '';
@@ -319,6 +318,7 @@ function renderLineSyncContinuousScroll() {
     const anticipationMs = 900;
     const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
     nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
     if ((now - lineSyncLastFrameLogTs) > 500) {
         lineSyncLastFrameLogTs = now;
@@ -354,7 +354,9 @@ export function updateLineSyncAnticipation(timing) {
         // Word-sync pixel renderer owns #lyrics-scroll-inner transform while active.
         stopLineSyncContinuousScroll(false, 'word-sync-active');
         const nextEl = document.getElementById('next-1');
+        const currentEl = document.getElementById('current');
         if (nextEl) nextEl.classList.remove('line-anticipating-current');
+        if (currentEl) currentEl.classList.remove('line-anticipating-previous');
         return;
     }
 
