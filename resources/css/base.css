@@ -207,6 +207,17 @@ body {
     transition: all 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Pixel-scroll anticipation (outgoing): gently shrink current line toward
+   previous-line styling before boundary to avoid a hard size snap/stutter. */
+.current.line-deanticipating-previous {
+    font-size: calc(clamp(1rem, 2.5vw, 1.8rem) * var(--lyrics-font-scale-adjacent, 1));
+    opacity: 0.76;
+    transform: scale(1.0);
+    letter-spacing: 0.2px;
+    text-shadow: 0 0 calc(10px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.15 * var(--lyrics-glow-intensity, 1)));
+    transition: all 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* ========== ANIMATIONS ========== */
 @keyframes wave {
     /* Gentle floating animation for current line + Scale */
