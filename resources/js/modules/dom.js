@@ -393,35 +393,34 @@ export function updateLineSyncAnticipation(timing) {
         nextLine: document.getElementById('next-1')?.textContent || ''
     }, 120);
 
-    // Disable continuous per-frame container scrolling in line-sync mode.
-    // It creates a second perceived scroll event after each boundary on some tracks.
-    if (lineSyncContinuousScrollActive || lineSyncRafId || lineSyncTimingAnchor) {
-        stopLineSyncContinuousScroll(true, 'continuous-scroll-disabled');
-    }
-
     const nextEl = document.getElementById('next-1');
     const currentEl = document.getElementById('current');
     if (!canAnticipate) {
-        if (nextEl) nextEl.classList.remove('line-anticipating-current');
-        if (currentEl) currentEl.classList.remove('line-anticipating-previous');
+        stopLineSyncContinuousScroll(true, 'invalid-or-missing-timing');
         return;
     }
 
-    // Keep only anticipation styling (incoming grows, outgoing shrinks) and
-    // let the single boundary transition handle actual line movement.
+    lineSyncContinuousScrollActive = true;
+    lineSyncTimingAnchor = {
+        lineProgress,
+        lineDurationMs,
+        timeToNextMs
+    };
+    lineSyncAnchorPerfTs = performance.now();
+    logLineSyncDebug('Anchor updated', {
+        lineProgress: Number(lineProgress.toFixed(4)),
+        lineDurationMs: Math.round(lineDurationMs),
+        timeToNextMs: Math.round(timeToNextMs)
+    });
+
     const anticipationMs = 900;
     const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
     if (nextEl) nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
     if (currentEl) currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
-    if ((performance.now() - lineSyncLastFrameLogTs) > 500) {
-        lineSyncLastFrameLogTs = performance.now();
-        logLineSyncDebug('Anticipation only', {
-            lineProgress: Number(lineProgress.toFixed(4)),
-            lineDurationMs: Math.round(lineDurationMs),
-            timeToNextMs: Math.round(timeToNextMs),
-            shouldAnticipate
-        });
+    if (!lineSyncRafId) {
+        logLineSyncDebug('Starting RAF loop');
+        lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
     }
     return;
 }
