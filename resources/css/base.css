@@ -211,23 +211,32 @@ body {
     font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
     opacity: 1;
     transform: scale(1.04);
+    font-weight: var(--lyrics-font-weight-current, 500);
+    letter-spacing: 0.5px;
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
 }
 
 /* Pixel-scroll anticipation: gently shrink current line before boundary so
    incoming growth and outgoing shrink happen concurrently, reducing jitter. */
 .current.line-anticipating-previous {
-    font-size: calc(clamp(1.2rem, 3.1vw, 2.35rem) * var(--lyrics-font-scale-current, 1));
-    opacity: 0.9;
-    text-shadow: 0 0 calc(14px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.2 * var(--lyrics-glow-intensity, 1)));
+    /* Match adjacent-line typography before boundary so the outgoing line
+       does not do a second size drop after it moves into prev-1. */
+    font-size: calc(clamp(1rem, 2.5vw, 1.8rem) * var(--lyrics-font-scale-adjacent, 1));
+    opacity: 0.75;
+    transform: translateY(5px);
+    letter-spacing: 0;
+    animation: none;
+    text-shadow: 0 0 calc(10px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.1 * var(--lyrics-glow-intensity, 1)));
 }
 
 /* Smoothly demote just-finished active line into previous slot */
 .previous.line-demoting-from-current {
-    font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
+    /* Keep layout stable in pixel-scroll mode: animate visual emphasis only,
+       not font-size, so old lines still "deflate" without reflow jitter. */
     opacity: 1;
     transform: scale(1.02);
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
+    transition: opacity 220ms ease, transform 220ms ease, text-shadow 220ms ease;
 }
 
 /* ========== ANIMATIONS ========== */
