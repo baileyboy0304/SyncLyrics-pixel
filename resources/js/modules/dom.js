@@ -374,7 +374,7 @@ export function updateLineSyncAnticipation(timing) {
     const lineProgress = timing?.line_progress;
     const lineDurationMs = timing?.line_duration_ms;
     const timeToNextMs = timing?.time_to_next_ms;
-    const canContinuousScroll = pixelScrollActive
+    const canAnticipate = pixelScrollActive
         && typeof lineProgress === 'number'
         && typeof lineDurationMs === 'number'
         && typeof timeToNextMs === 'number'
@@ -388,33 +388,42 @@ export function updateLineSyncAnticipation(timing) {
         lineProgress,
         lineDurationMs,
         timeToNextMs,
-        canContinuousScroll,
+        canAnticipate,
         currentLine: document.getElementById('current')?.textContent || '',
         nextLine: document.getElementById('next-1')?.textContent || ''
     }, 120);
 
-    if (!canContinuousScroll) {
-        stopLineSyncContinuousScroll(true, 'invalid-or-missing-timing');
+    // Disable continuous per-frame container scrolling in line-sync mode.
+    // It creates a second perceived scroll event after each boundary on some tracks.
+    if (lineSyncContinuousScrollActive || lineSyncRafId || lineSyncTimingAnchor) {
+        stopLineSyncContinuousScroll(true, 'continuous-scroll-disabled');
+    }
+
+    const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
+    if (!canAnticipate) {
+        if (nextEl) nextEl.classList.remove('line-anticipating-current');
+        if (currentEl) currentEl.classList.remove('line-anticipating-previous');
         return;
     }
 
-    lineSyncContinuousScrollActive = true;
-    lineSyncTimingAnchor = {
-        lineProgress,
-        lineDurationMs,
-        timeToNextMs
-    };
-    lineSyncAnchorPerfTs = performance.now();
-    logLineSyncDebug('Anchor updated', {
-        lineProgress: Number(lineProgress.toFixed(4)),
-        lineDurationMs: Math.round(lineDurationMs),
-        timeToNextMs: Math.round(timeToNextMs)
-    });
+    // Keep only anticipation styling (incoming grows, outgoing shrinks) and
+    // let the single boundary transition handle actual line movement.
+    const anticipationMs = 900;
+    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
+    if (nextEl) nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    if (currentEl) currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
-    if (!lineSyncRafId) {
-        logLineSyncDebug('Starting RAF loop');
-        lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
+    if ((performance.now() - lineSyncLastFrameLogTs) > 500) {
+        lineSyncLastFrameLogTs = performance.now();
+        logLineSyncDebug('Anticipation only', {
+            lineProgress: Number(lineProgress.toFixed(4)),
+            lineDurationMs: Math.round(lineDurationMs),
+            timeToNextMs: Math.round(timeToNextMs),
+            shouldAnticipate
+        });
     }
+    return;
 }
 
 // ========== THEME COLOR ==========
