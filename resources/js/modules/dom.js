@@ -422,6 +422,7 @@ export function updateLineSyncAnticipation(timing) {
         logLineSyncDebug('Starting RAF loop');
         lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
     }
+    return;
 }
 
 // ========== THEME COLOR ==========
