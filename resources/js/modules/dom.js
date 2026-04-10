@@ -13,6 +13,7 @@ import {
     visualModeActive,
     hasWordSync,
     wordSyncEnabled,
+    pixelScrollEnabled,
     setLastLyrics,
     setUpdateInProgress
 } from './state.js';
@@ -25,6 +26,19 @@ let lineSyncContinuousScrollActive = false;
 let lineSyncTimingAnchor = null;
 let lineSyncAnchorPerfTs = 0;
 let lineSyncRafId = null;
+let lineSyncLastFrameLogTs = 0;
+let lineSyncLastUpdateLogTs = 0;
+
+function logLineSyncDebug(message, data = null, throttleMs = 0) {
+    const now = performance.now();
+    if (throttleMs > 0 && (now - lineSyncLastUpdateLogTs) < throttleMs) return;
+    if (throttleMs > 0) lineSyncLastUpdateLogTs = now;
+    if (data !== null) {
+        console.log(`[LineSyncPixel] ${message}`, data);
+    } else {
+        console.log(`[LineSyncPixel] ${message}`);
+    }
+}
 
 // ========== ELEMENT CACHE ==========
 // Cache for frequently accessed elements
@@ -115,6 +129,15 @@ export function setLyricsInDom(lyrics) {
     // Seeks and jumps fall back to the instant update so the display never stalls.
     const pixelScrollActive = document.getElementById('lyrics')
         ?.classList.contains('pixel-scroll-mode');
+    if (pixelScrollActive) {
+        logLineSyncDebug('Lyrics window update', {
+            isForward,
+            isBackward,
+            lineSyncContinuousScrollActive,
+            current: lyrics[2],
+            next: lyrics[3]
+        }, 120);
+    }
     if (pixelScrollActive && (isForward || isBackward) && !lineSyncContinuousScrollActive) {
         animatePixelScroll(applyUpdate, isForward);
     } else {
@@ -152,7 +175,10 @@ export function setLyricsInDom(lyrics) {
  *
  * @param {Object|null} timing - line_sync_timing from /lyrics payload
  */
-function stopLineSyncContinuousScroll(resetDom = true) {
+function stopLineSyncContinuousScroll(resetDom = true, reason = 'unknown') {
+    if (lineSyncContinuousScrollActive || lineSyncTimingAnchor) {
+        logLineSyncDebug(`Stopping continuous scroll (reason=${reason}, resetDom=${resetDom})`);
+    }
     lineSyncContinuousScrollActive = false;
     lineSyncTimingAnchor = null;
     lineSyncAnchorPerfTs = 0;
@@ -180,17 +206,17 @@ function renderLineSyncContinuousScroll() {
     const inner = document.getElementById('lyrics-scroll-inner');
     const lyricsEl = document.getElementById('lyrics');
     if (!nextEl || !currentEl || !inner || !lyricsEl) {
-        stopLineSyncContinuousScroll(true);
+        stopLineSyncContinuousScroll(true, 'missing-dom-elements');
         return;
     }
 
     if (hasWordSync && wordSyncEnabled) {
-        stopLineSyncContinuousScroll(true);
+        stopLineSyncContinuousScroll(true, 'word-sync-active');
         return;
     }
 
     if (!lyricsEl.classList.contains('pixel-scroll-mode')) {
-        stopLineSyncContinuousScroll(true);
+        stopLineSyncContinuousScroll(true, 'pixel-scroll-disabled');
         return;
     }
 
@@ -214,6 +240,20 @@ function renderLineSyncContinuousScroll() {
     const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
     nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
 
+    if ((now - lineSyncLastFrameLogTs) > 500) {
+        lineSyncLastFrameLogTs = now;
+        logLineSyncDebug('Frame', {
+            elapsedMs: Math.round(elapsedMs),
+            durationMs: Math.round(durationMs),
+            anchorProgress: Number(anchorProgress.toFixed(4)),
+            dynamicProgress: Number(dynamicProgress.toFixed(4)),
+            offsetPx: Number(offset.toFixed(2)),
+            translateYPx: Number((-(offset * dynamicProgress)).toFixed(2)),
+            timeToNextMs: Math.round(timeToNextMs),
+            shouldAnticipate
+        });
+    }
+
     lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
 }
 
@@ -221,11 +261,18 @@ export function updateLineSyncAnticipation(timing) {
     const lyricsEl = document.getElementById('lyrics');
     if (!lyricsEl) return;
 
+    // Self-heal: keep the CSS mode class aligned with global setting.
+    // Word-sync transitions can temporarily rebuild/remove DOM and may desync class state.
+    if (pixelScrollEnabled && !lyricsEl.classList.contains('pixel-scroll-mode')) {
+        lyricsEl.classList.add('pixel-scroll-mode');
+        logLineSyncDebug('Recovered missing pixel-scroll-mode class from state');
+    }
+
     // Do not interfere with word-sync renderer modes.
     if (hasWordSync && wordSyncEnabled) {
         // Stop line-sync RAF/state, but DO NOT reset shared inner transform here.
         // Word-sync pixel renderer owns #lyrics-scroll-inner transform while active.
-        stopLineSyncContinuousScroll(false);
+        stopLineSyncContinuousScroll(false, 'word-sync-active');
         const nextEl = document.getElementById('next-1');
         if (nextEl) nextEl.classList.remove('line-anticipating-current');
         return;
@@ -243,8 +290,19 @@ export function updateLineSyncAnticipation(timing) {
         && lineProgress >= 0
         && lineProgress <= 1;
 
+    logLineSyncDebug('Timing tick', {
+        pixelScrollActive,
+        hasTiming: !!timing,
+        lineProgress,
+        lineDurationMs,
+        timeToNextMs,
+        canContinuousScroll,
+        currentLine: document.getElementById('current')?.textContent || '',
+        nextLine: document.getElementById('next-1')?.textContent || ''
+    }, 120);
+
     if (!canContinuousScroll) {
-        stopLineSyncContinuousScroll(true);
+        stopLineSyncContinuousScroll(true, 'invalid-or-missing-timing');
         return;
     }
 
@@ -255,8 +313,14 @@ export function updateLineSyncAnticipation(timing) {
         timeToNextMs
     };
     lineSyncAnchorPerfTs = performance.now();
+    logLineSyncDebug('Anchor updated', {
+        lineProgress: Number(lineProgress.toFixed(4)),
+        lineDurationMs: Math.round(lineDurationMs),
+        timeToNextMs: Math.round(timeToNextMs)
+    });
 
     if (!lineSyncRafId) {
+        logLineSyncDebug('Starting RAF loop');
         lineSyncRafId = requestAnimationFrame(renderLineSyncContinuousScroll);
     }
 }
