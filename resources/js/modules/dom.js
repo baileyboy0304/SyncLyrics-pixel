@@ -200,11 +200,7 @@ export function setLyricsInDom(lyrics) {
     }
     if (pixelScrollActive && (isForward || isBackward)) {
         if (lineSyncContinuousScrollActive) {
-            // Capture where the continuous scroll has translated content to, so we can
-            // animate back to centre rather than snapping — this stops the active line
-            // from appearing to jump after every line boundary.
             const inner = document.getElementById('lyrics-scroll-inner');
-            const currentT = inner ? getTranslateY(inner) : 0;
             stopLineSyncContinuousScroll(false, 'line-change');
 
             // Before measuring or applying text, instantly collapse the next-1
@@ -219,14 +215,11 @@ export function setLyricsInDom(lyrics) {
 
             applyUpdate();
 
-            // Animate from the continuous-scroll offset back to the natural centred
-            // position rather than hard-resetting (which caused the visible snap).
+            // IMPORTANT: do not run a second recenter tween here. Continuous scroll
+            // already performed the movement; animating back to 0 creates the second
+            // visible "scroll pulse" and typography jitter users reported.
             if (inner) {
                 inner.style.transition = 'none';
-                inner.style.transform = `translateY(${currentT}px)`;
-                inner.getBoundingClientRect(); // force layout
-                const snapMs = Math.round(500 / Math.max(0.1, pixelScrollSpeed || 1.0));
-                inner.style.transition = `transform ${snapMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
                 inner.style.transform = 'translateY(0)';
             }
         } else {

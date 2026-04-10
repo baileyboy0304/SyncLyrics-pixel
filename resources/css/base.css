@@ -126,6 +126,9 @@ body {
     width: 100%;
     padding: 0.2rem;
     max-width: 90%;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+    word-break: normal;
     line-height: 1.2;
     /* Performance optimizations */
     will-change: opacity, transform;
@@ -161,7 +164,7 @@ body {
     /* STANDARD: No background pill by default */
     background: none;
     margin: 0 auto;
-    width: fit-content;
+    width: 100%;
     
     /* STANDARD: Subtle glow with configurable intensity */
     text-shadow: 0 0 calc(10px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.1 * var(--lyrics-glow-intensity, 1)));
@@ -195,7 +198,7 @@ body {
     
     /* STANDARD: No background pill by default */
     background: none;
-    width: fit-content;
+    width: 100%;
     padding: 0;
     margin: 0 auto;
     box-shadow: none;
