@@ -113,6 +113,14 @@ export function setLyricsInDom(lyrics) {
     setUpdateInProgress(true);
     setLastLyrics([...lyrics]);
 
+    // Prevent anticipation class carryover across line boundaries.
+    // Without this reset, the old "next" line can stay enlarged briefly after
+    // becoming active, causing both current and next lines to look inflated.
+    const currentElForReset = document.getElementById('current');
+    const nextElForReset = document.getElementById('next-1');
+    if (currentElForReset) currentElForReset.classList.remove('line-deanticipating-previous');
+    if (nextElForReset) nextElForReset.classList.remove('line-anticipating-current');
+
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
         updateLyricElement(document.getElementById('prev-2'), lyrics[0]);
@@ -259,20 +267,6 @@ function renderLineSyncContinuousScroll() {
             offsetPx: Number(offset.toFixed(2)),
             centerCorrectionPx: Number(centerCorrection.toFixed(2)),
             translateYPx: Number((centerCorrection - (offset * dynamicProgress)).toFixed(2)),
-            timeToNextMs: Math.round(timeToNextMs),
-            shouldAnticipate
-        });
-    }
-
-    if ((now - lineSyncLastFrameLogTs) > 500) {
-        lineSyncLastFrameLogTs = now;
-        logLineSyncDebug('Frame', {
-            elapsedMs: Math.round(elapsedMs),
-            durationMs: Math.round(durationMs),
-            anchorProgress: Number(anchorProgress.toFixed(4)),
-            dynamicProgress: Number(dynamicProgress.toFixed(4)),
-            offsetPx: Number(offset.toFixed(2)),
-            translateYPx: Number((-(offset * dynamicProgress)).toFixed(2)),
             timeToNextMs: Math.round(timeToNextMs),
             shouldAnticipate
         });
