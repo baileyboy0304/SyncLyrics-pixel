@@ -110,6 +110,7 @@ body {
     gap: clamp(0.8rem, 3vh, 2rem);
     padding: clamp(1rem, 3vw, 2rem);
     width: 100%;
+    min-height: 100%;
     /* Hardware-accelerated animation for smooth pixel scrolling */
     will-change: transform;
 }
@@ -117,11 +118,15 @@ body {
 /* ========== LYRICS LINE STYLING ========== */
 .lyric-line {
     text-align: center;
-    /* Smooth transition for all animations */
-    transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Smooth transition for typography state changes */
+    transition: font-size 0.72s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.52s ease,
+                transform 0.72s cubic-bezier(0.22, 1, 0.36, 1),
+                text-shadow 0.72s cubic-bezier(0.22, 1, 0.36, 1);
     width: 100%;
     padding: 0.2rem;
     max-width: 90%;
+    line-height: 1.2;
     /* Performance optimizations */
     will-change: opacity, transform;
     transform: translateZ(0);
@@ -204,7 +209,14 @@ body {
     opacity: 1;
     transform: scale(1.04);
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
-    transition: all 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Smoothly demote just-finished active line into previous slot */
+.previous.line-demoting-from-current {
+    font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
+    opacity: 1;
+    transform: scale(1.02);
+    text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
 }
 
 /* ========== ANIMATIONS ========== */

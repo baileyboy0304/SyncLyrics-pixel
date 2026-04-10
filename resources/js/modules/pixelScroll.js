@@ -31,7 +31,9 @@ export function animatePixelScroll(updateFn, isForward) {
 
     const currentRect   = currentEl.getBoundingClientRect();
     const neighbourRect = neighbourEl.getBoundingClientRect();
-    const offset = neighbourRect.top - currentRect.top;
+    const currentCenterY = currentRect.top + (currentRect.height / 2);
+    const neighbourCenterY = neighbourRect.top + (neighbourRect.height / 2);
+    const offset = neighbourCenterY - currentCenterY;
 
     if (Math.abs(offset) < 1) {
         updateFn();

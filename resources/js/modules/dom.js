@@ -28,6 +28,7 @@ let lineSyncAnchorPerfTs = 0;
 let lineSyncRafId = null;
 let lineSyncLastFrameLogTs = 0;
 let lineSyncLastUpdateLogTs = 0;
+let lineDemotionResetTimer = null;
 
 function logLineSyncDebug(message, data = null, throttleMs = 0) {
     const now = performance.now();
@@ -115,12 +116,36 @@ export function setLyricsInDom(lyrics) {
 
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
+        const previousEl = document.getElementById('prev-1');
+        if (previousEl) {
+            previousEl.classList.remove('line-demoting-from-current');
+        }
         updateLyricElement(document.getElementById('prev-2'), lyrics[0]);
         updateLyricElement(document.getElementById('prev-1'), lyrics[1]);
         updateLyricElement(document.getElementById('current'), lyrics[2]);
         updateLyricElement(document.getElementById('next-1'), lyrics[3]);
         updateLyricElement(document.getElementById('next-2'), lyrics[4]);
         updateLyricElement(document.getElementById('next-3'), lyrics[5]);
+
+        // Prevent stale anticipation from briefly inflating the newly assigned next line.
+        const nextEl = document.getElementById('next-1');
+        if (nextEl) {
+            nextEl.classList.remove('line-anticipating-current');
+        }
+
+        // Smoothly shrink old active line into previous slot on step transitions.
+        const shouldDemote = isForward || isBackward;
+        if (shouldDemote && previousEl) {
+            previousEl.classList.add('line-demoting-from-current');
+            requestAnimationFrame(() => {
+                previousEl.classList.remove('line-demoting-from-current');
+            });
+            if (lineDemotionResetTimer) clearTimeout(lineDemotionResetTimer);
+            lineDemotionResetTimer = setTimeout(() => {
+                previousEl.classList.remove('line-demoting-from-current');
+                lineDemotionResetTimer = null;
+            }, 900);
+        }
     };
 
     // Pixel scroll: animate a translateY slide for sequential line advances.
@@ -228,7 +253,9 @@ function renderLineSyncContinuousScroll() {
 
     const currentRect = currentEl.getBoundingClientRect();
     const nextRect = nextEl.getBoundingClientRect();
-    const offset = nextRect.top - currentRect.top;
+    const currentCenterY = currentRect.top + (currentRect.height / 2);
+    const nextCenterY = nextRect.top + (nextRect.height / 2);
+    const offset = nextCenterY - currentCenterY;
     if (Math.abs(offset) >= 1) {
         const translateY = -(offset * dynamicProgress);
         inner.style.transition = 'none';
