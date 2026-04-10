@@ -211,6 +211,8 @@ body {
     font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
     opacity: 1;
     transform: scale(1.04);
+    font-weight: var(--lyrics-font-weight-current, 500);
+    letter-spacing: 0.5px;
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
 }
 
@@ -224,10 +226,12 @@ body {
 
 /* Smoothly demote just-finished active line into previous slot */
 .previous.line-demoting-from-current {
-    font-size: calc(clamp(1.5rem, 4vw, 3rem) * var(--lyrics-font-scale-current, 1));
+    /* Keep layout stable in pixel-scroll mode: animate visual emphasis only,
+       not font-size, so old lines still "deflate" without reflow jitter. */
     opacity: 1;
     transform: scale(1.02);
     text-shadow: 0 0 calc(20px * var(--lyrics-glow-intensity, 1)) rgba(255, 255, 255, calc(0.3 * var(--lyrics-glow-intensity, 1)));
+    transition: opacity 220ms ease, transform 220ms ease, text-shadow 220ms ease;
 }
 
 /* ========== ANIMATIONS ========== */
