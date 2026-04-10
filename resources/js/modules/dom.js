@@ -126,12 +126,27 @@ export function setLyricsInDom(lyrics) {
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
         const previousEl = document.getElementById('prev-1');
+        const currentEl = document.getElementById('current');
+        const hadOutgoingAnticipation = !!(currentEl && currentEl.classList.contains('line-anticipating-previous'));
         if (previousEl) {
             previousEl.classList.remove('line-demoting-from-current');
         }
+
+        // If current line is in outgoing anticipation state, clear it BEFORE swapping
+        // text so the new incoming current line doesn't inherit a temporary shrunken
+        // style and trigger a second "grow" pulse right after transition.
+        if (hadOutgoingAnticipation && currentEl) {
+            currentEl.style.transition = 'none';
+            currentEl.classList.remove('line-anticipating-previous');
+            currentEl.getBoundingClientRect(); // flush snap removal
+            currentEl.style.transition = '';
+        } else if (currentEl) {
+            currentEl.classList.remove('line-anticipating-previous');
+        }
+
         updateLyricElement(document.getElementById('prev-2'), lyrics[0]);
         updateLyricElement(document.getElementById('prev-1'), lyrics[1]);
-        updateLyricElement(document.getElementById('current'), lyrics[2]);
+        updateLyricElement(currentEl, lyrics[2]);
         updateLyricElement(document.getElementById('next-1'), lyrics[3]);
         updateLyricElement(document.getElementById('next-2'), lyrics[4]);
         updateLyricElement(document.getElementById('next-3'), lyrics[5]);
@@ -152,7 +167,9 @@ export function setLyricsInDom(lyrics) {
         // Smoothly shrink old active line into previous slot on step transitions.
         // Single rAF keeps grow/shrink nearly concurrent at the boundary while still
         // giving the browser one frame to commit the "from" style.
-        const shouldDemote = isForward || isBackward;
+        // Skip fallback demotion when outgoing anticipation was already active;
+        // otherwise we get a second size-change pulse after the boundary.
+        const shouldDemote = (isForward || isBackward) && !hadOutgoingAnticipation;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
