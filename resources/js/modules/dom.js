@@ -14,12 +14,21 @@ import {
     hasWordSync,
     wordSyncEnabled,
     pixelScrollEnabled,
+    pixelScrollSpeed,
     setLastLyrics,
     setUpdateInProgress
 } from './state.js';
 import { areLyricsDifferent } from './utils.js';
 import { animatePixelScroll } from './pixelScroll.js';
 // Note: Word-sync imports removed - animation loop is now single authority for lyrics during word-sync
+
+// Read the current translateY value (px) from an element's inline style.
+function getTranslateY(el) {
+    const t = el.style.transform;
+    if (!t) return 0;
+    const m = t.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+    return m ? parseFloat(m[1]) : 0;
+}
 
 // Line-sync continuous pixel-scroll state
 let lineSyncContinuousScrollActive = false;
@@ -128,17 +137,29 @@ export function setLyricsInDom(lyrics) {
         updateLyricElement(document.getElementById('next-3'), lyrics[5]);
 
         // Prevent stale anticipation from briefly inflating the newly assigned next line.
+        // Disable transitions first so the new content snaps to next-size instantly —
+        // we don't want the shrink animation playing on the brand-new text.
         const nextEl = document.getElementById('next-1');
-        if (nextEl) {
+        if (nextEl && nextEl.classList.contains('line-anticipating-current')) {
+            nextEl.style.transition = 'none';
+            nextEl.classList.remove('line-anticipating-current');
+            nextEl.getBoundingClientRect(); // flush so the instant resize is committed
+            nextEl.style.transition = '';
+        } else if (nextEl) {
             nextEl.classList.remove('line-anticipating-current');
         }
 
         // Smoothly shrink old active line into previous slot on step transitions.
+        // Double rAF ensures one paint occurs with the element at full (current) size
+        // before we remove the class — otherwise the CSS font-size transition never
+        // sees a "from" state and the line jumps straight to previous size.
         const shouldDemote = isForward || isBackward;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
-                previousEl.classList.remove('line-demoting-from-current');
+                requestAnimationFrame(() => {
+                    previousEl.classList.remove('line-demoting-from-current');
+                });
             });
             if (lineDemotionResetTimer) clearTimeout(lineDemotionResetTimer);
             lineDemotionResetTimer = setTimeout(() => {
@@ -163,20 +184,52 @@ export function setLyricsInDom(lyrics) {
             next: lyrics[3]
         }, 120);
     }
-    if (pixelScrollActive && (isForward || isBackward) && !lineSyncContinuousScrollActive) {
-        animatePixelScroll(applyUpdate, isForward);
-    } else {
-        applyUpdate();
-        // In continuous line-sync mode, each poll frame controls transform directly.
-        // After a line boundary update, hard-reset transform so the new text window
-        // starts from the top of the next interval without visual drift.
+    if (pixelScrollActive && (isForward || isBackward)) {
         if (lineSyncContinuousScrollActive) {
+            // Capture where the continuous scroll has translated content to, so we can
+            // animate back to centre rather than snapping — this stops the active line
+            // from appearing to jump after every line boundary.
             const inner = document.getElementById('lyrics-scroll-inner');
+            const currentT = inner ? getTranslateY(inner) : 0;
+            stopLineSyncContinuousScroll(false, 'line-change');
+
+            // Before measuring or applying text, instantly collapse the next-1
+            // anticipation size so it doesn't skew the upcoming layout.
+            const preNext = document.getElementById('next-1');
+            if (preNext && preNext.classList.contains('line-anticipating-current')) {
+                preNext.style.transition = 'none';
+                preNext.classList.remove('line-anticipating-current');
+                preNext.getBoundingClientRect();
+                preNext.style.transition = '';
+            }
+
+            applyUpdate();
+
+            // Animate from the continuous-scroll offset back to the natural centred
+            // position rather than hard-resetting (which caused the visible snap).
             if (inner) {
                 inner.style.transition = 'none';
+                inner.style.transform = `translateY(${currentT}px)`;
+                inner.getBoundingClientRect(); // force layout
+                const snapMs = Math.round(500 / Math.max(0.1, pixelScrollSpeed || 1.0));
+                inner.style.transition = `transform ${snapMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
                 inner.style.transform = 'translateY(0)';
             }
+        } else {
+            // Pre-remove anticipation class before animatePixelScroll measures positions
+            // so the offset is based on the natural (smaller) next-1 size — preventing
+            // the scroll animation from starting too far out.
+            const preNext = document.getElementById('next-1');
+            if (isForward && preNext && preNext.classList.contains('line-anticipating-current')) {
+                preNext.style.transition = 'none';
+                preNext.classList.remove('line-anticipating-current');
+                preNext.getBoundingClientRect();
+                preNext.style.transition = '';
+            }
+            animatePixelScroll(applyUpdate, isForward);
         }
+    } else {
+        applyUpdate();
     }
 
     // Self-healing: If we are showing lyrics and NOT in visual mode, ensure the hidden class is gone
