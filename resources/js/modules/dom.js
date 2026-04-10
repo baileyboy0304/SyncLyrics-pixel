@@ -126,12 +126,27 @@ export function setLyricsInDom(lyrics) {
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
         const previousEl = document.getElementById('prev-1');
+        const currentEl = document.getElementById('current');
+        const hadOutgoingAnticipation = !!(currentEl && currentEl.classList.contains('line-anticipating-previous'));
         if (previousEl) {
             previousEl.classList.remove('line-demoting-from-current');
         }
+
+        // If current line is in outgoing anticipation state, clear it BEFORE swapping
+        // text so the new incoming current line doesn't inherit a temporary shrunken
+        // style and trigger a second "grow" pulse right after transition.
+        if (hadOutgoingAnticipation && currentEl) {
+            currentEl.style.transition = 'none';
+            currentEl.classList.remove('line-anticipating-previous');
+            currentEl.getBoundingClientRect(); // flush snap removal
+            currentEl.style.transition = '';
+        } else if (currentEl) {
+            currentEl.classList.remove('line-anticipating-previous');
+        }
+
         updateLyricElement(document.getElementById('prev-2'), lyrics[0]);
         updateLyricElement(document.getElementById('prev-1'), lyrics[1]);
-        updateLyricElement(document.getElementById('current'), lyrics[2]);
+        updateLyricElement(currentEl, lyrics[2]);
         updateLyricElement(document.getElementById('next-1'), lyrics[3]);
         updateLyricElement(document.getElementById('next-2'), lyrics[4]);
         updateLyricElement(document.getElementById('next-3'), lyrics[5]);
@@ -150,16 +165,15 @@ export function setLyricsInDom(lyrics) {
         }
 
         // Smoothly shrink old active line into previous slot on step transitions.
-        // Double rAF ensures one paint occurs with the element at full (current) size
-        // before we remove the class — otherwise the CSS font-size transition never
-        // sees a "from" state and the line jumps straight to previous size.
-        const shouldDemote = isForward || isBackward;
+        // Single rAF keeps grow/shrink nearly concurrent at the boundary while still
+        // giving the browser one frame to commit the "from" style.
+        // Skip fallback demotion when outgoing anticipation was already active;
+        // otherwise we get a second size-change pulse after the boundary.
+        const shouldDemote = (isForward || isBackward) && !hadOutgoingAnticipation;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    previousEl.classList.remove('line-demoting-from-current');
-                });
+                previousEl.classList.remove('line-demoting-from-current');
             });
             if (lineDemotionResetTimer) clearTimeout(lineDemotionResetTimer);
             lineDemotionResetTimer = setTimeout(() => {
@@ -186,11 +200,7 @@ export function setLyricsInDom(lyrics) {
     }
     if (pixelScrollActive && (isForward || isBackward)) {
         if (lineSyncContinuousScrollActive) {
-            // Capture where the continuous scroll has translated content to, so we can
-            // animate back to centre rather than snapping — this stops the active line
-            // from appearing to jump after every line boundary.
             const inner = document.getElementById('lyrics-scroll-inner');
-            const currentT = inner ? getTranslateY(inner) : 0;
             stopLineSyncContinuousScroll(false, 'line-change');
 
             // Before measuring or applying text, instantly collapse the next-1
@@ -205,14 +215,11 @@ export function setLyricsInDom(lyrics) {
 
             applyUpdate();
 
-            // Animate from the continuous-scroll offset back to the natural centred
-            // position rather than hard-resetting (which caused the visible snap).
+            // IMPORTANT: do not run a second recenter tween here. Continuous scroll
+            // already performed the movement; animating back to 0 creates the second
+            // visible "scroll pulse" and typography jitter users reported.
             if (inner) {
                 inner.style.transition = 'none';
-                inner.style.transform = `translateY(${currentT}px)`;
-                inner.getBoundingClientRect(); // force layout
-                const snapMs = Math.round(500 / Math.max(0.1, pixelScrollSpeed || 1.0));
-                inner.style.transition = `transform ${snapMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
                 inner.style.transform = 'translateY(0)';
             }
         } else {
@@ -267,8 +274,10 @@ function stopLineSyncContinuousScroll(resetDom = true, reason = 'unknown') {
 
     if (!resetDom) return;
     const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
     const inner = document.getElementById('lyrics-scroll-inner');
     if (nextEl) nextEl.classList.remove('line-anticipating-current');
+    if (currentEl) currentEl.classList.remove('line-anticipating-previous');
     if (inner) {
         inner.style.transition = '';
         inner.style.transform = '';
@@ -319,6 +328,7 @@ function renderLineSyncContinuousScroll() {
     const anticipationMs = 900;
     const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
     nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
     if ((now - lineSyncLastFrameLogTs) > 500) {
         lineSyncLastFrameLogTs = now;
@@ -354,7 +364,9 @@ export function updateLineSyncAnticipation(timing) {
         // Word-sync pixel renderer owns #lyrics-scroll-inner transform while active.
         stopLineSyncContinuousScroll(false, 'word-sync-active');
         const nextEl = document.getElementById('next-1');
+        const currentEl = document.getElementById('current');
         if (nextEl) nextEl.classList.remove('line-anticipating-current');
+        if (currentEl) currentEl.classList.remove('line-anticipating-previous');
         return;
     }
 
@@ -362,7 +374,7 @@ export function updateLineSyncAnticipation(timing) {
     const lineProgress = timing?.line_progress;
     const lineDurationMs = timing?.line_duration_ms;
     const timeToNextMs = timing?.time_to_next_ms;
-    const canContinuousScroll = pixelScrollActive
+    const canAnticipate = pixelScrollActive
         && typeof lineProgress === 'number'
         && typeof lineDurationMs === 'number'
         && typeof timeToNextMs === 'number'
@@ -376,12 +388,14 @@ export function updateLineSyncAnticipation(timing) {
         lineProgress,
         lineDurationMs,
         timeToNextMs,
-        canContinuousScroll,
+        canAnticipate,
         currentLine: document.getElementById('current')?.textContent || '',
         nextLine: document.getElementById('next-1')?.textContent || ''
     }, 120);
 
-    if (!canContinuousScroll) {
+    const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
+    if (!canAnticipate) {
         stopLineSyncContinuousScroll(true, 'invalid-or-missing-timing');
         return;
     }
@@ -398,6 +412,11 @@ export function updateLineSyncAnticipation(timing) {
         lineDurationMs: Math.round(lineDurationMs),
         timeToNextMs: Math.round(timeToNextMs)
     });
+
+    const anticipationMs = 900;
+    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
+    if (nextEl) nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    if (currentEl) currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
     if (!lineSyncRafId) {
         logLineSyncDebug('Starting RAF loop');
