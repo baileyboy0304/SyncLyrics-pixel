@@ -189,8 +189,10 @@ function stopLineSyncContinuousScroll(resetDom = true, reason = 'unknown') {
 
     if (!resetDom) return;
     const nextEl = document.getElementById('next-1');
+    const currentEl = document.getElementById('current');
     const inner = document.getElementById('lyrics-scroll-inner');
     if (nextEl) nextEl.classList.remove('line-anticipating-current');
+    if (currentEl) currentEl.classList.remove('line-deanticipating-previous');
     if (inner) {
         inner.style.transition = '';
         inner.style.transform = '';
@@ -229,8 +231,14 @@ function renderLineSyncContinuousScroll() {
     const currentRect = currentEl.getBoundingClientRect();
     const nextRect = nextEl.getBoundingClientRect();
     const offset = nextRect.top - currentRect.top;
+    const lyricsRect = lyricsEl.getBoundingClientRect();
+    const containerCenter = lyricsRect.top + (lyricsRect.height / 2);
+    const currentCenter = currentRect.top + (currentRect.height / 2);
+    const centerCorrection = containerCenter - currentCenter;
     if (Math.abs(offset) >= 1) {
-        const translateY = -(offset * dynamicProgress);
+        // Keep the active line visually centered while it transitions to previous.
+        // This removes the high/low drift caused by font-size/line-height changes.
+        const translateY = centerCorrection - (offset * dynamicProgress);
         inner.style.transition = 'none';
         inner.style.transform = `translateY(${translateY}px)`;
     }
@@ -239,6 +247,22 @@ function renderLineSyncContinuousScroll() {
     const anticipationMs = 900;
     const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
     nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    currentEl.classList.toggle('line-deanticipating-previous', shouldAnticipate);
+
+    if ((now - lineSyncLastFrameLogTs) > 500) {
+        lineSyncLastFrameLogTs = now;
+        logLineSyncDebug('Frame', {
+            elapsedMs: Math.round(elapsedMs),
+            durationMs: Math.round(durationMs),
+            anchorProgress: Number(anchorProgress.toFixed(4)),
+            dynamicProgress: Number(dynamicProgress.toFixed(4)),
+            offsetPx: Number(offset.toFixed(2)),
+            centerCorrectionPx: Number(centerCorrection.toFixed(2)),
+            translateYPx: Number((centerCorrection - (offset * dynamicProgress)).toFixed(2)),
+            timeToNextMs: Math.round(timeToNextMs),
+            shouldAnticipate
+        });
+    }
 
     if ((now - lineSyncLastFrameLogTs) > 500) {
         lineSyncLastFrameLogTs = now;
