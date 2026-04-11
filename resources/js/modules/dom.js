@@ -63,9 +63,9 @@ function applyLineSyncMorph(progress) {
     };
 
     // State model for smooth continuous movement
-    const far = { scale: 0.88, opacity: 0.40, blur: 1.0, y: 10 };
-    const adjacent = { scale: 0.93, opacity: 0.70, blur: 0.0, y: 5 };
-    const active = { scale: 1.02, opacity: 1.0, blur: 0.0, y: 0 };
+    const far = { scale: 0.72, opacity: 0.40, blur: 1.0, y: 10 };
+    const adjacent = { scale: 1.0, opacity: 0.70, blur: 0.0, y: 5 };
+    const active = { scale: 1.62, opacity: 1.0, blur: 0.0, y: 0 };
 
     applyMorph(prev2, far, far);
     applyMorph(prev1, adjacent, far);

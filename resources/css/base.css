@@ -210,6 +210,13 @@ body {
     animation: none;
 }
 
+/* In pixel-scroll mode, keep a single layout font-size baseline for every line.
+   Per-frame JS morphing handles visual grow/shrink, preventing class-swap jumps
+   when a line becomes current at the exact lyric boundary. */
+#lyrics.pixel-scroll-mode .lyric-line {
+    font-size: calc(clamp(1rem, 2.5vw, 1.8rem) * var(--lyrics-font-scale-adjacent, 1));
+}
+
 /* Pixel-scroll anticipation: pre-grow upcoming line before it becomes current
    to avoid a sudden adjacent->current size jump at line boundary. */
 .next.line-anticipating-current {
