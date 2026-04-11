@@ -204,6 +204,12 @@ body {
     border-radius: 0;
 }
 
+/* Continuous pixel-scroll owns per-frame transforms; disable float bobbing
+   to prevent transform composition jitter while scrolling between lines. */
+#lyrics.pixel-scroll-mode .current {
+    animation: none;
+}
+
 /* Pixel-scroll anticipation: pre-grow upcoming line before it becomes current
    to avoid a sudden adjacent->current size jump at line boundary. */
 .next.line-anticipating-current {
