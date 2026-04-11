@@ -249,6 +249,18 @@ export function setLyricsInDom(lyrics) {
     if (pixelScrollActive && (isForward || isBackward)) {
         if (lineSyncContinuousScrollActive) {
             const inner = document.getElementById('lyrics-scroll-inner');
+            const currentEl = document.getElementById('current');
+            const nextEl = document.getElementById('next-1');
+            let handoffCarryTranslate = 0;
+            if (inner && currentEl && nextEl) {
+                const beforeTranslate = getTranslateY(inner);
+                const currentRect = currentEl.getBoundingClientRect();
+                const nextRect = nextEl.getBoundingClientRect();
+                const currentCenterY = currentRect.top + (currentRect.height / 2);
+                const nextCenterY = nextRect.top + (nextRect.height / 2);
+                const centerOffset = nextCenterY - currentCenterY;
+                handoffCarryTranslate = beforeTranslate + centerOffset;
+            }
             stopLineSyncContinuousScroll(false, 'line-change');
             clearLineSyncMorphStyles();
 
@@ -269,7 +281,7 @@ export function setLyricsInDom(lyrics) {
             // visible "scroll pulse" and typography jitter users reported.
             if (inner) {
                 inner.style.transition = 'none';
-                inner.style.transform = 'translateY(0)';
+                inner.style.transform = `translateY(${handoffCarryTranslate}px)`;
             }
         } else {
             // Pre-remove anticipation class before animatePixelScroll measures positions
