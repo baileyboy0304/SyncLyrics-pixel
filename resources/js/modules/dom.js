@@ -39,6 +39,51 @@ let lineSyncLastFrameLogTs = 0;
 let lineSyncLastUpdateLogTs = 0;
 let lineDemotionResetTimer = null;
 
+function lerp(a, b, t) {
+    return a + ((b - a) * t);
+}
+
+function applyLineSyncMorph(progress) {
+    const p = Math.max(0, Math.min(1, progress));
+    const prev2 = document.getElementById('prev-2');
+    const prev1 = document.getElementById('prev-1');
+    const current = document.getElementById('current');
+    const next1 = document.getElementById('next-1');
+    const next2 = document.getElementById('next-2');
+
+    const applyMorph = (el, fromState, toState) => {
+        if (!el) return;
+        const scale = lerp(fromState.scale, toState.scale, p);
+        const opacity = lerp(fromState.opacity, toState.opacity, p);
+        const blur = lerp(fromState.blur, toState.blur, p);
+        const y = lerp(fromState.y, toState.y, p);
+        el.style.opacity = `${opacity}`;
+        el.style.filter = blur > 0.01 ? `blur(${blur.toFixed(2)}px)` : '';
+        el.style.transform = `translateY(${y.toFixed(2)}px) scale(${scale.toFixed(4)})`;
+    };
+
+    // State model for smooth continuous movement
+    const far = { scale: 0.72, opacity: 0.40, blur: 1.0, y: 10 };
+    const adjacent = { scale: 1.0, opacity: 0.70, blur: 0.0, y: 5 };
+    const active = { scale: 1.62, opacity: 1.0, blur: 0.0, y: 0 };
+
+    applyMorph(prev2, far, far);
+    applyMorph(prev1, adjacent, far);
+    applyMorph(current, active, adjacent);
+    applyMorph(next1, adjacent, active);
+    applyMorph(next2, far, adjacent);
+}
+
+function clearLineSyncMorphStyles() {
+    ['prev-2', 'prev-1', 'current', 'next-1', 'next-2', 'next-3'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.opacity = '';
+        el.style.filter = '';
+        el.style.transform = '';
+    });
+}
+
 function logLineSyncDebug(message, data = null, throttleMs = 0) {
     const now = performance.now();
     if (throttleMs > 0 && (now - lineSyncLastUpdateLogTs) < throttleMs) return;
@@ -123,6 +168,9 @@ export function setLyricsInDom(lyrics) {
     setUpdateInProgress(true);
     setLastLyrics([...lyrics]);
 
+    const pixelScrollActive = document.getElementById('lyrics')
+        ?.classList.contains('pixel-scroll-mode');
+
     // Core DOM update: replace text content of all six lyric line elements
     const applyUpdate = () => {
         const previousEl = document.getElementById('prev-1');
@@ -169,7 +217,9 @@ export function setLyricsInDom(lyrics) {
         // giving the browser one frame to commit the "from" style.
         // Skip fallback demotion when outgoing anticipation was already active;
         // otherwise we get a second size-change pulse after the boundary.
-        const shouldDemote = (isForward || isBackward) && !hadOutgoingAnticipation;
+        const shouldDemote = (isForward || isBackward)
+            && !hadOutgoingAnticipation
+            && !pixelScrollActive;
         if (shouldDemote && previousEl) {
             previousEl.classList.add('line-demoting-from-current');
             requestAnimationFrame(() => {
@@ -187,8 +237,6 @@ export function setLyricsInDom(lyrics) {
     // The CSS class on #lyrics is the canonical on/off flag — works in both the
     // main app (set by api.js from server config) and the sandbox (set directly).
     // Seeks and jumps fall back to the instant update so the display never stalls.
-    const pixelScrollActive = document.getElementById('lyrics')
-        ?.classList.contains('pixel-scroll-mode');
     if (pixelScrollActive) {
         logLineSyncDebug('Lyrics window update', {
             isForward,
@@ -202,6 +250,7 @@ export function setLyricsInDom(lyrics) {
         if (lineSyncContinuousScrollActive) {
             const inner = document.getElementById('lyrics-scroll-inner');
             stopLineSyncContinuousScroll(false, 'line-change');
+            clearLineSyncMorphStyles();
 
             // Before measuring or applying text, instantly collapse the next-1
             // anticipation size so it doesn't skew the upcoming layout.
@@ -278,6 +327,7 @@ function stopLineSyncContinuousScroll(resetDom = true, reason = 'unknown') {
     const inner = document.getElementById('lyrics-scroll-inner');
     if (nextEl) nextEl.classList.remove('line-anticipating-current');
     if (currentEl) currentEl.classList.remove('line-anticipating-previous');
+    clearLineSyncMorphStyles();
     if (inner) {
         inner.style.transition = '';
         inner.style.transform = '';
@@ -324,11 +374,8 @@ function renderLineSyncContinuousScroll() {
         inner.style.transform = `translateY(${translateY}px)`;
     }
 
+    applyLineSyncMorph(dynamicProgress);
     const timeToNextMs = Math.max(0, (lineSyncTimingAnchor.timeToNextMs || 0) - elapsedMs);
-    const anticipationMs = 900;
-    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
-    nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
-    currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
     if ((now - lineSyncLastFrameLogTs) > 500) {
         lineSyncLastFrameLogTs = now;
@@ -339,8 +386,7 @@ function renderLineSyncContinuousScroll() {
             dynamicProgress: Number(dynamicProgress.toFixed(4)),
             offsetPx: Number(offset.toFixed(2)),
             translateYPx: Number((-(offset * dynamicProgress)).toFixed(2)),
-            timeToNextMs: Math.round(timeToNextMs),
-            shouldAnticipate
+            timeToNextMs: Math.round(timeToNextMs)
         });
     }
 
@@ -393,8 +439,6 @@ export function updateLineSyncAnticipation(timing) {
         nextLine: document.getElementById('next-1')?.textContent || ''
     }, 120);
 
-    const nextEl = document.getElementById('next-1');
-    const currentEl = document.getElementById('current');
     if (!canAnticipate) {
         stopLineSyncContinuousScroll(true, 'invalid-or-missing-timing');
         return;
@@ -412,11 +456,6 @@ export function updateLineSyncAnticipation(timing) {
         lineDurationMs: Math.round(lineDurationMs),
         timeToNextMs: Math.round(timeToNextMs)
     });
-
-    const anticipationMs = 900;
-    const shouldAnticipate = timeToNextMs >= 0 && timeToNextMs <= anticipationMs;
-    if (nextEl) nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
-    if (currentEl) currentEl.classList.toggle('line-anticipating-previous', shouldAnticipate);
 
     if (!lineSyncRafId) {
         logLineSyncDebug('Starting RAF loop');
