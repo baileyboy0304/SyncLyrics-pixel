@@ -108,6 +108,9 @@ import audioSource from './modules/audioSource.js';
 // Word Sync (Level 2)
 import { startWordSyncAnimation, stopWordSyncAnimation, resetWordSyncState, updateDebugOverlay } from './modules/wordSync.js';
 
+// Line Sync (Level 2)
+import { startLineSyncAnimation, stopLineSyncAnimation, resetLineSyncState } from './modules/lineSync.js';
+
 // Latency (Level 3)
 import { setupLatencyControls, setupLatencyKeyboardShortcuts, updateLatencyDisplay, updateMainLatencyVisibility, initLatencyPositioning, setupLatencyUIToggle } from './modules/latency.js';
 
@@ -496,8 +499,9 @@ async function updateLoop() {
             // Reset outro state (line-sync visual mode timer + next-up card)
             resetOutroState();
 
-            // Reset word-sync state on track change (stops animation, clears logged flag)
+            // Reset word-sync and line-sync state on track change (stops animation, clears logged flag)
             resetWordSyncState();
+            resetLineSyncState();
 
             // Reset waveform and spectrum on track change
             resetWaveform();
@@ -699,6 +703,11 @@ async function updateLoop() {
         // The rAF loop runs at display refresh rate (60-144fps) for smooth animation
         // Position is interpolated between polls using anchor + elapsed time
         startWordSyncAnimation();
+
+        // Start line-sync animation loop if word-sync is NOT active
+        // Uses the same flywheel clock approach for smooth pixel scrolling,
+        // font inflate/deflate, and active line highlighting
+        startLineSyncAnimation();
         
         // Update word-sync toggle button UI state (icon, unavailable class)
         // This ensures button reflects current hasWordSync state after each poll
@@ -810,10 +819,12 @@ async function main() {
             
             // Start/stop word-sync animation based on new state
             if (newState && hasWordSync) {
+                stopLineSyncAnimation();  // Stop line-sync when word-sync takes over
                 startWordSyncAnimation();
                 console.log('[WordSync] Enabled via toggle');
             } else {
                 stopWordSyncAnimation();
+                startLineSyncAnimation();  // Start line-sync when word-sync is disabled
                 console.log('[WordSync] Disabled via toggle');
             }
             

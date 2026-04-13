@@ -2172,6 +2172,19 @@ body.soft-mode .background-overlay {
     }
 }
 
+/* ========== LINE-SYNC HIGHLIGHT STYLES ========== */
+/* Active line highlighting for line-sync mode - matches word-sync visual style */
+
+.line-sync-highlight {
+    /* Enhanced glow matching .word-active styling */
+    text-shadow:
+        0 0 calc(15px * var(--lyrics-glow-intensity, 1)) color-mix(in srgb, var(--lyrics-text-color, white) 50%, transparent),
+        0 0 calc(30px * var(--lyrics-glow-intensity, 1)) color-mix(in srgb, var(--lyrics-text-color, white) 25%, transparent) !important;
+    /* Full brightness */
+    opacity: 1 !important;
+    color: var(--lyrics-text-color, white) !important;
+}
+
 /* ========== DEBUG TIMING OVERLAY ========== */
 
 .debug-timing-overlay {
