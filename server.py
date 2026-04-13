@@ -46,6 +46,59 @@ _instrumental_markers_cache = {
     'markers': []      # List of timestamps
 }
 
+
+def _build_line_synced_timing_payload():
+    """
+    Build per-line timing payload for line-sync UX.
+    Includes line start/end and optional per-word timing when available.
+    """
+    line_lyrics = lyrics_module.current_song_lyrics or []
+    if not line_lyrics:
+        return None
+
+    word_synced = lyrics_module.current_song_word_synced_lyrics or []
+    word_by_start = {}
+    for ws_line in word_synced:
+        if not isinstance(ws_line, dict):
+            continue
+        start = ws_line.get("start")
+        if isinstance(start, (int, float)):
+            word_by_start[round(float(start), 3)] = ws_line
+
+    payload = []
+    for i, line in enumerate(line_lyrics):
+        if not isinstance(line, (list, tuple)) or len(line) < 2:
+            continue
+
+        start = float(line[0])
+        text = line[1] if isinstance(line[1], str) else str(line[1] or "")
+        if i + 1 < len(line_lyrics) and isinstance(line_lyrics[i + 1], (list, tuple)) and len(line_lyrics[i + 1]) > 0:
+            end = float(line_lyrics[i + 1][0])
+        else:
+            end = start + 4.0
+
+        words = None
+        ws_match = word_by_start.get(round(start, 3))
+        if ws_match and isinstance(ws_match.get("words"), list):
+            words = []
+            for word in ws_match["words"]:
+                if not isinstance(word, dict):
+                    continue
+                words.append({
+                    "text": word.get("text", ""),
+                    "time": float(word.get("time", 0)),
+                    "duration": float(word.get("duration")) if isinstance(word.get("duration"), (int, float)) else None
+                })
+
+        payload.append({
+            "start": start,
+            "end": end,
+            "text": text,
+            "words": words
+        })
+
+    return payload
+
 # Legacy playback sources - these use existing Windows/Spotify routing.
 # Plugin sources not in this set get routed to their own playback handlers.
 LEGACY_PLAYBACK_SOURCES = {'windows_media', 'spotify', 'spotify_hybrid', 'spicetify', 'audio_recognition'}
@@ -277,7 +330,8 @@ async def lyrics() -> dict:
             "is_instrumental_manual": is_instrumental_manual,
             "word_synced_lyrics": None,
             "has_word_sync": False,
-            "word_sync_provider": None
+            "word_sync_provider": None,
+            "line_synced_timing": None
         }
     
     # Check if lyrics are actually empty or just [...]
@@ -366,6 +420,8 @@ async def lyrics() -> dict:
             _instrumental_markers_cache['key'] = cache_key
             _instrumental_markers_cache['markers'] = instrumental_markers
 
+    line_synced_timing = _build_line_synced_timing_payload()
+
     return {
         "lyrics": list(lyrics_data),
         "colors": colors,
@@ -380,7 +436,9 @@ async def lyrics() -> dict:
         # Flag for toggle availability: true if ANY cached provider has word-sync
         "any_provider_has_word_sync": any_provider_has_word_sync,
         # Instrumental markers for gap detection (timestamps where ♪ appears in line-sync)
-        "instrumental_markers": instrumental_markers if instrumental_markers else None
+        "instrumental_markers": instrumental_markers if instrumental_markers else None,
+        # Line-timing payload for smooth line-sync animations
+        "line_synced_timing": line_synced_timing
     }
 
 @app.route("/current-track")

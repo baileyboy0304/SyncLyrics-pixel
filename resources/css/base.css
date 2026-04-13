@@ -2043,8 +2043,20 @@ body.soft-mode .background-overlay {
                 transform var(--ws-transition-duration, 0ms) ease-out;
 }
 
+/* Line-sync active highlight: mirror the emphasis used for active karaoke words */
+.current.line-sync-active {
+    color: var(--lyrics-text-color, white);
+    text-shadow: 0 0 calc(15px * var(--lyrics-glow-intensity, 1))
+        color-mix(in srgb, var(--lyrics-text-color, white) 50%, transparent);
+}
+
 /* Fade out old line before replacement */
 .current.word-sync-active.line-exiting {
+    opacity: 0;
+    transform: translateY(-8px);
+}
+
+.current.line-exiting:not(.word-sync-active) {
     opacity: 0;
     transform: translateY(-8px);
 }

@@ -13,6 +13,11 @@ import {
     visualModeActive,
     hasWordSync,
     wordSyncEnabled,
+    lineSyncedTiming,
+    wordSyncAnchorPosition,
+    wordSyncAnchorTimestamp,
+    wordSyncIsPlaying,
+    wordSyncLatencyCompensation,
     setLastLyrics,
     setUpdateInProgress
 } from './state.js';
@@ -23,6 +28,9 @@ import { animatePixelScroll } from './pixelScroll.js';
 // ========== ELEMENT CACHE ==========
 // Cache for frequently accessed elements
 const elementCache = new Map();
+let lineSyncAnimationId = null;
+let currentTimingIndex = -1;
+const LINE_ANTICIPATION_MS = 220;
 
 /**
  * Get element by ID with caching
@@ -101,6 +109,8 @@ export function setLyricsInDom(lyrics) {
         updateLyricElement(document.getElementById('next-1'), lyrics[3]);
         updateLyricElement(document.getElementById('next-2'), lyrics[4]);
         updateLyricElement(document.getElementById('next-3'), lyrics[5]);
+        updateLineSyncActiveState();
+        updateCurrentTimingIndex(lyrics[2]);
     };
 
     // Pixel scroll: animate a translateY slide for sequential line advances.
@@ -109,10 +119,26 @@ export function setLyricsInDom(lyrics) {
     // Seeks and jumps fall back to the instant update so the display never stalls.
     const pixelScrollActive = document.getElementById('lyrics')
         ?.classList.contains('pixel-scroll-mode');
+    const currentEl = document.getElementById('current');
+    const runSmoothSwap = () => {
+        if (!currentEl) {
+            applyUpdate();
+            return;
+        }
+        currentEl.classList.remove('line-entering');
+        currentEl.classList.add('line-exiting');
+        setTimeout(() => {
+            applyUpdate();
+            currentEl.classList.remove('line-exiting');
+            currentEl.classList.add('line-entering');
+            setTimeout(() => currentEl.classList.remove('line-entering'), 180);
+        }, 90);
+    };
+
     if (pixelScrollActive && (isForward || isBackward)) {
-        animatePixelScroll(applyUpdate, isForward);
+        animatePixelScroll(runSmoothSwap, isForward);
     } else {
-        applyUpdate();
+        runSmoothSwap();
     }
 
     // Self-healing: If we are showing lyrics and NOT in visual mode, ensure the hidden class is gone
@@ -127,6 +153,71 @@ export function setLyricsInDom(lyrics) {
     setTimeout(() => {
         setUpdateInProgress(false);
     }, 100);
+
+    ensureLineSyncAnimationLoop();
+}
+
+function normalizeLineText(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+function updateCurrentTimingIndex(currentText) {
+    if (!Array.isArray(lineSyncedTiming) || lineSyncedTiming.length === 0) {
+        currentTimingIndex = -1;
+        return;
+    }
+    const target = normalizeLineText(currentText);
+    if (!target) {
+        currentTimingIndex = -1;
+        return;
+    }
+
+    const startIdx = Math.max(0, currentTimingIndex - 4);
+    const endIdx = Math.min(lineSyncedTiming.length, currentTimingIndex + 6);
+    for (let i = startIdx; i < endIdx; i++) {
+        if (normalizeLineText(lineSyncedTiming[i]?.text) === target) {
+            currentTimingIndex = i;
+            return;
+        }
+    }
+    const fallbackIdx = lineSyncedTiming.findIndex((line) => normalizeLineText(line?.text) === target);
+    currentTimingIndex = fallbackIdx;
+}
+
+function getLineSyncPosition() {
+    if (!wordSyncAnchorTimestamp) return wordSyncAnchorPosition || 0;
+    const elapsed = Math.max(0, (performance.now() - wordSyncAnchorTimestamp) / 1000);
+    return (wordSyncAnchorPosition || 0) + (wordSyncIsPlaying ? elapsed : 0) + (wordSyncLatencyCompensation || 0);
+}
+
+function updateLineSyncActiveState() {
+    const currentEl = document.getElementById('current');
+    if (!currentEl) return;
+    currentEl.classList.toggle('line-sync-active', !hasWordSync || !wordSyncEnabled);
+}
+
+function ensureLineSyncAnimationLoop() {
+    if (lineSyncAnimationId !== null) return;
+    const loop = () => {
+        lineSyncAnimationId = requestAnimationFrame(loop);
+        if (hasWordSync && wordSyncEnabled) return;
+        if (!Array.isArray(lineSyncedTiming) || currentTimingIndex < 0) return;
+
+        const nextEl = document.getElementById('next-1');
+        if (!nextEl) return;
+
+        const nextLine = lineSyncedTiming[currentTimingIndex + 1];
+        if (!nextLine || typeof nextLine.start !== 'number') {
+            nextEl.classList.remove('line-anticipating-current');
+            return;
+        }
+
+        const position = getLineSyncPosition();
+        const msUntilNext = (nextLine.start - position) * 1000;
+        const shouldAnticipate = msUntilNext <= LINE_ANTICIPATION_MS && msUntilNext > -120;
+        nextEl.classList.toggle('line-anticipating-current', shouldAnticipate);
+    };
+    loop();
 }
 
 // ========== THEME COLOR ==========
