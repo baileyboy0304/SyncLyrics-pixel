@@ -42,7 +42,9 @@ import {
     debugPollTimestamp,
     debugBadSamples,
     setPixelScrollEnabled,
-    setPixelScrollSpeed
+    setPixelScrollSpeed,
+    setLineSyncedLyrics,
+    setHasLineSync
 } from './state.js';
 import { isLatencyBeingAdjusted } from './latency.js';
 
@@ -402,6 +404,15 @@ export async function getLyrics(updateBackgroundFn, updateThemeColorFn, updatePr
         // Update instrumental markers (timestamps where ♪ appears in line-sync)
         // Used for accurate gap detection during word-sync playback
         setInstrumentalMarkers(data.instrumental_markers);
+
+        // Update line-synced lyrics timing data (for smooth line-sync animation)
+        if (data.line_synced_lyrics && data.line_synced_lyrics.length > 1) {
+            setLineSyncedLyrics(data.line_synced_lyrics);
+            setHasLineSync(true);
+        } else {
+            setLineSyncedLyrics(null);
+            setHasLineSync(false);
+        }
 
         // Update provider info (now uses word-sync provider when enabled)
         if (data.provider && updateProviderDisplayFn) {

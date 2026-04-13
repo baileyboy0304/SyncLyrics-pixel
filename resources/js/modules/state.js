@@ -34,6 +34,10 @@ export let anyProviderHasWordSync = false; // True if ANY cached provider has wo
 export let instrumentalMarkers = [];       // Timestamps where ♪ appears in line-sync (for gap detection)
 export let wordSyncTransitionMs = 0;       // Line transition delay (0 = instant, 70 = smooth fade)
 
+// ========== LINE-SYNC STATE ==========
+export let lineSyncedLyrics = null;  // Line timing data [{start, text}, ...] from API
+export let hasLineSync = false;       // Whether line timing data is available
+
 // ========== DEBUG OVERLAY STATE ==========
 export let debugTimingEnabled = false;  // Whether debug overlay is visible
 export let debugRtt = 0;                // Current RTT in ms
@@ -199,6 +203,8 @@ export function setProviderWordSyncOffset(value) { providerWordSyncOffset = valu
 export function setSongWordSyncOffset(value) { songWordSyncOffset = value; }
 export function setAnyProviderHasWordSync(value) { anyProviderHasWordSync = value; }
 export function setInstrumentalMarkers(value) { instrumentalMarkers = value || []; }
+export function setLineSyncedLyrics(value) { lineSyncedLyrics = value; }
+export function setHasLineSync(value) { hasLineSync = value; }
 export function setWordSyncTransitionMs(value) { wordSyncTransitionMs = value; }
 
 // Debug overlay setters

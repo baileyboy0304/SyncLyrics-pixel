@@ -13,6 +13,7 @@ import {
     visualModeActive,
     hasWordSync,
     wordSyncEnabled,
+    hasLineSync,
     setLastLyrics,
     setUpdateInProgress
 } from './state.js';
@@ -75,6 +76,14 @@ export function setLyricsInDom(lyrics) {
     // We still need to handle the initial state before animation starts.
     if (hasWordSync && wordSyncEnabled) {
         // Only update lastLyrics for tracking, but don't touch DOM
+        setLastLyrics([...lyrics]);
+        return;
+    }
+
+    // When line-sync timing data is available (lineSync.js controls rendering
+    // via full-list DOM with smooth scrolling and font transitions).
+    // Skip the old 6-slot text swap to prevent conflicts.
+    if (hasLineSync) {
         setLastLyrics([...lyrics]);
         return;
     }
