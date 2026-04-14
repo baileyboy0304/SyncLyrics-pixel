@@ -77,6 +77,17 @@ let activeOutroToken = 0;
 // Intro tracking
 let introDisplayed = false;
 
+// Scroll smoothing - lerp toward target to absorb layout jitter
+// during font-size transitions on wrapped lines
+let currentScrollY = 0;
+let scrollInitialized = false;
+const SCROLL_SMOOTHING = 0.18;   // Lower = smoother (0.18 ≈ 90% in ~12 frames / 200ms)
+const SCROLL_SNAP_PX = 0.5;     // Snap to target when within this distance
+
+// Per-line class cache - avoids resetting className every frame
+// which triggers expensive style recalculation for every visible line
+let lineClassCache = [];
+
 
 // ========== UTILITIES ==========
 
@@ -216,6 +227,11 @@ function buildLineSyncDOM() {
     inner.innerHTML = html;
     fullListInitialized = true;
 
+    // Reset class cache and scroll state for the new track
+    lineClassCache = new Array(lineSyncedLyrics.length).fill('');
+    currentScrollY = 0;
+    scrollInitialized = false;
+
     const firstLine = lineSyncedLyrics[0];
     currentTrackSignature = firstLine ? firstLine.start : 'empty';
 }
@@ -251,8 +267,30 @@ function destroyLineSyncDOM() {
 // ========== FRAME UPDATE ==========
 
 /**
+ * Determine the CSS role string for a line given the active index.
+ * Returns a class-suffix string that is appended to 'lyric-line '.
+ */
+function getLineRole(i, activeIdx, shouldAnticipateNext) {
+    if (i < activeIdx - 2 || i > activeIdx + 3) return 'out-of-bounds';
+    if (i === activeIdx) return 'current line-sync-highlight';
+    if (i === activeIdx - 1) return 'previous';
+    if (i === activeIdx + 1) {
+        return shouldAnticipateNext ? 'next line-anticipating-current' : 'next';
+    }
+    if (i === activeIdx - 2) return 'far-previous';
+    return 'far-next';
+}
+
+/**
  * Per-frame update: assign CSS classes and compute scroll position.
- * Follows the same pattern as updateFullListDOM() in wordSync.js.
+ * Follows the same pattern as updateFullListDOM() in wordSync.js,
+ * with two jitter-reduction improvements:
+ *
+ * 1. CLASS CACHE – only touches an element's className when its role
+ *    actually changes, eliminating ~300 redundant style recalcs/sec.
+ * 2. SCROLL LERP – exponentially smooths the translateY target so
+ *    layout shifts from font-size transitions on wrapped lines are
+ *    absorbed instead of causing visible jumps.
  *
  * @param {Array} lines - lineSyncedLyrics array
  * @param {number} position - Current flywheel position in seconds
@@ -309,32 +347,19 @@ function updateLineSyncDOM(lines, position) {
         }
     }
 
-    // --- Update CSS classes for each line ---
-    lines.forEach((_, i) => {
+    // --- Update CSS classes (only when role changes) ---
+    // Skipping unchanged lines avoids resetting className every frame,
+    // which would trigger expensive forced-style-recalculation on
+    // every visible element at 60 fps.
+    for (let i = 0; i < lines.length; i++) {
+        const role = getLineRole(i, newActiveIdx, shouldAnticipateNext);
+        if (lineClassCache[i] === role) continue;   // no change – skip DOM write
+        lineClassCache[i] = role;
         const el = document.getElementById(`ls-line-${i}`);
-        if (!el) return;
+        if (el) el.className = 'lyric-line ' + role;
+    }
 
-        el.className = 'lyric-line';
-
-        if (i < newActiveIdx - 2 || i > newActiveIdx + 3) {
-            el.classList.add('out-of-bounds');
-        } else if (i === newActiveIdx) {
-            el.classList.add('current', 'line-sync-highlight');
-        } else if (i === newActiveIdx - 1) {
-            el.classList.add('previous');
-        } else if (i === newActiveIdx + 1) {
-            el.classList.add('next');
-            if (shouldAnticipateNext) {
-                el.classList.add('line-anticipating-current');
-            }
-        } else if (i === newActiveIdx - 2) {
-            el.classList.add('far-previous');
-        } else {
-            el.classList.add('far-next');
-        }
-    });
-
-    // --- Calculate smooth scroll position ---
+    // --- Calculate raw scroll target ---
     let targetY = 0;
 
     if (position <= (lines[0].start || 0)) {
@@ -385,22 +410,37 @@ function updateLineSyncDOM(lines, position) {
         }
     }
 
-    inner.style.transform = `translateY(${containerHalfHeight - targetY}px)`;
+    // --- Smooth scroll (lerp) ---
+    // During font-size CSS transitions on wrapped lines the measured
+    // offsetTop / offsetHeight values jitter as the browser reflows text.
+    // Lerping absorbs those transient layout shifts so the scroll movement
+    // stays silky even when a two-line lyric inflates to three lines.
+    const goalY = containerHalfHeight - targetY;
+
+    if (!scrollInitialized) {
+        currentScrollY = goalY;
+        scrollInitialized = true;
+    } else {
+        const diff = goalY - currentScrollY;
+        if (Math.abs(diff) < SCROLL_SNAP_PX) {
+            currentScrollY = goalY;
+        } else {
+            currentScrollY += diff * SCROLL_SMOOTHING;
+        }
+    }
+
+    inner.style.transform = `translateY(${currentScrollY}px)`;
 
     // Determine safe-snap zone for flywheel
-    // In line-sync, intro/outro/far-past-line-end are safe
     if (newActiveIdx === -1) {
         inSafeSnapZone = true;  // intro
     } else if (newActiveIdx >= 0) {
         const line = lines[newActiveIdx];
         const nextLine = lines[newActiveIdx + 1];
         if (nextLine) {
-            const lineEnd = nextLine.start;
-            const remaining = lineEnd - position;
-            // Safe zone: within last 200ms of a line (transition hidden)
+            const remaining = nextLine.start - position;
             inSafeSnapZone = remaining < 0.2;
         } else {
-            // Last line - always safe after a while
             inSafeSnapZone = position > (line.start + 5);
         }
     }
@@ -484,6 +524,10 @@ function cleanupLineSync() {
     introDisplayed = false;
     outroToken++;
     activeOutroToken = 0;
+    // Reset scroll and class cache
+    currentScrollY = 0;
+    scrollInitialized = false;
+    lineClassCache = [];
 }
 
 
