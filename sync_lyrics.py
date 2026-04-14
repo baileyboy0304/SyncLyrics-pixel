@@ -334,6 +334,14 @@ async def cleanup() -> None:
     # The daemon threads will auto-terminate when Python exits, and capture.abort() above
     # handles proper stream cleanup without risking deadlock.
 
+    # Gracefully shut down Hypercorn BEFORE cancelling the server task.
+    # Signalling the shutdown trigger lets Hypercorn close its bound sockets
+    # cleanly, preventing EADDRINUSE (errno 98) when a new process tries to
+    # bind to the same port during a restart.
+    logger.debug("CLEANUP: Signalling Hypercorn graceful shutdown...")
+    if _hypercorn_shutdown:
+        _hypercorn_shutdown.set()
+
     # Cancel server task (Hypercorn)
     logger.debug("CLEANUP: Cancelling server task (Hypercorn)...")
     if _server_task:
