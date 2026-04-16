@@ -224,7 +224,51 @@ async def lyrics() -> dict:
     """
     API endpoint that returns lyrics data as JSON.
     Called by the frontend JavaScript to fetch lyrics updates.
+
+    If ``?player=<name>`` is supplied and multi-instance mode is active, the
+    response is guarded so it only surfaces lyrics when the global lyrics
+    module's current song matches the requested player's track. This prevents
+    a display pinned to player B from showing player A's lyrics while the
+    backend's global lyrics state catches up. Full per-player lyrics caching
+    is deferred to a follow-up refactor.
     """
+    player_scope = _player_name_from_request()
+    if player_scope:
+        mgr = _get_player_manager_if_running()
+        if mgr is not None:
+            scoped_song = mgr.get_current_song(player_scope)
+            scoped_colors = (scoped_song or {}).get("colors") or ["#24273a", "#363b54"]
+            if not scoped_song:
+                return {
+                    "lyrics": [],
+                    "msg": f"Waiting for player '{player_scope}'...",
+                    "colors": scoped_colors,
+                    "provider": None,
+                    "has_lyrics": False,
+                    "is_instrumental": False,
+                    "is_instrumental_manual": False,
+                    "word_synced_lyrics": None,
+                    "has_word_sync": False,
+                    "word_sync_provider": None,
+                    "player": player_scope,
+                }
+            current = lyrics_module.current_song_data or {}
+            if (current.get("artist") != scoped_song.get("artist")
+                    or current.get("title") != scoped_song.get("title")):
+                return {
+                    "lyrics": [],
+                    "msg": "Loading lyrics...",
+                    "colors": scoped_colors,
+                    "provider": None,
+                    "has_lyrics": False,
+                    "is_instrumental": False,
+                    "is_instrumental_manual": False,
+                    "word_synced_lyrics": None,
+                    "has_word_sync": False,
+                    "word_sync_provider": None,
+                    "player": player_scope,
+                }
+
     lyrics_data = await get_timed_lyrics_previous_and_next()
     metadata = await get_current_song_meta_data()
     
