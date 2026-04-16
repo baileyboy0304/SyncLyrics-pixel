@@ -501,6 +501,57 @@ UDP_AUDIO = {
     "lock_consensus_tolerance": float(os.getenv("UDP_LOCK_CONSENSUS_TOLERANCE") or conf("udp_audio.lock_consensus_tolerance") or 3.0),
 }
 
+# Multi-Instance Players
+# A "player" is a named logical endpoint that consumes a distinct RTP/UDP stream
+# (usually one per speaker group). When empty, the addon runs in legacy
+# single-player mode and all UDP audio is merged into one stream.
+#
+# Each player may pin to a stream by source_ip, rtp_ssrc, or both; unbound
+# players are resolved at runtime by the player_registry from observed packets.
+def _parse_players(raw) -> list:
+    """Normalize the players config into a list of dicts with required keys."""
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        import json
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    if not isinstance(raw, list):
+        return []
+    out = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        ssrc_raw = entry.get("rtp_ssrc")
+        ssrc_int = None
+        if ssrc_raw not in (None, "", "null"):
+            try:
+                ssrc_int = int(str(ssrc_raw), 0) & 0xFFFFFFFF
+            except (ValueError, TypeError):
+                ssrc_int = None
+        out.append({
+            "name": name,
+            "source_ip": (entry.get("source_ip") or "").strip() or None,
+            "rtp_ssrc": ssrc_int,
+            "music_assistant_player_id": (entry.get("music_assistant_player_id") or "").strip() or None,
+            "description": (entry.get("description") or "").strip() or None,
+        })
+    return out
+
+
+PLAYERS = {
+    "auto_discover": _safe_bool(os.getenv("PLAYERS_AUTO_DISCOVER") or conf("players_auto_discover"), True),
+    "configured": _parse_players(os.getenv("PLAYERS_JSON") or conf("players") or []),
+}
+
+
 # Multi-Match Position Verification
 # When SFP returns multiple matches, use position tracking to select the correct one
 MULTI_MATCH = {

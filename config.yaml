@@ -1,5 +1,5 @@
 name: "SyncLyrics (UDP)"
-version: "1.0.18"
+version: "1.0.19"
 slug: synclyrics_udp
 description: "Real-time synchronized lyrics. UDP audio input variant."
 url: "https://github.com/baileyboy0304/SyncLyrics"
@@ -39,6 +39,8 @@ options:
   udp_audio_port: 6056
   udp_audio_sample_rate: 16000
   udp_jitter_buffer_ms: 60
+  players: []
+  players_auto_discover: true
 schema:
   spotify_client_id: str
   spotify_client_secret: str
@@ -66,3 +68,10 @@ schema:
   udp_audio_port: port
   udp_audio_sample_rate: "int(8000,48000)"
   udp_jitter_buffer_ms: "int(0,500)"
+  players:
+    - name: str
+      source_ip: str?
+      rtp_ssrc: str?
+      music_assistant_player_id: str?
+      description: str?
+  players_auto_discover: bool

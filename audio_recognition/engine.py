@@ -69,7 +69,9 @@ class RecognitionEngine:
         metadata_enricher: Optional[Callable[[str], Any]] = None,
         title_search_enricher: Optional[Callable[[str, str], Any]] = None,
         on_song_change: Optional[Callable[[RecognitionResult], None]] = None,
-        on_state_change: Optional[Callable[[EngineState], None]] = None
+        on_state_change: Optional[Callable[[EngineState], None]] = None,
+        player_name: Optional[str] = None,
+        shared_udp_capture: Optional[UdpAudioCapture] = None,
     ):
         """
         Initialize the recognition engine.
@@ -124,8 +126,12 @@ class RecognitionEngine:
         self._frontend_queue: Optional[FrontendAudioQueue] = None
         self._frontend_mode = False
 
-        # UDP audio capture (receives PCM audio over UDP for HA integration)
-        self._udp_capture: Optional[UdpAudioCapture] = None
+        # UDP audio capture (receives PCM audio over UDP for HA integration).
+        # In multi-instance mode a PlayerManager passes in a shared capture and
+        # a player_name so this engine consumes only its own stream.
+        self._udp_capture: Optional[UdpAudioCapture] = shared_udp_capture
+        self._owns_udp_capture: bool = shared_udp_capture is None
+        self._player_name: Optional[str] = player_name
         
         # Audio level tracking for UI meter (0.0 - 1.0)
         self._last_audio_level: float = 0.0
@@ -161,6 +167,11 @@ class RecognitionEngine:
     def state(self) -> EngineState:
         """Current engine state."""
         return self._state
+
+    @property
+    def player_name(self) -> Optional[str]:
+        """The player this engine is bound to, if any (multi-instance mode)."""
+        return self._player_name
     
     @property
     def is_running(self) -> bool:
@@ -359,6 +370,7 @@ class RecognitionEngine:
             "frontend_mode": self._frontend_mode,
             "udp_mode": self._udp_capture is not None and self._udp_capture.is_running,
             "audio_level": self._last_audio_level,
+            "player_name": self._player_name,
         }
     
     async def start(self):
@@ -371,16 +383,20 @@ class RecognitionEngine:
             logger.warning("Engine already running")
             return
             
-        # Start UDP listener if configured
+        # Start UDP listener if configured.
+        # In multi-instance mode the PlayerManager provides a shared capture
+        # that's already running; we only create our own when no shared one
+        # was injected (legacy single-player path).
         from config import UDP_AUDIO
         udp_enabled = UDP_AUDIO["enabled"]
 
-        if udp_enabled:
+        if udp_enabled and self._udp_capture is None:
             self._udp_capture = UdpAudioCapture(
                 port=UDP_AUDIO["port"],
                 sample_rate=UDP_AUDIO["sample_rate"],
                 jitter_buffer_ms=UDP_AUDIO.get("jitter_buffer_ms", 60),
             )
+            self._owns_udp_capture = True
             try:
                 await self._udp_capture.start()
             except Exception as e:
@@ -454,8 +470,9 @@ class RecognitionEngine:
             finally:
                 self._task = None
         
-        # Stop UDP listener if running
-        if self._udp_capture:
+        # Stop UDP listener if we own it. In multi-instance mode the shared
+        # capture is managed by the PlayerManager, so we leave it alone.
+        if self._udp_capture and self._owns_udp_capture:
             try:
                 await self._udp_capture.stop()
             except Exception:
@@ -569,8 +586,12 @@ class RecognitionEngine:
             )
         elif self._udp_capture and self._udp_capture.is_running:
             # UDP mode: block until a full chunk of fresh audio arrives
-            # (mirrors mic capture which blocks on hardware)
-            audio = await self._udp_capture.get_audio(self.capture_duration)
+            # (mirrors mic capture which blocks on hardware). In multi-player
+            # mode the shared capture will demux by player_name.
+            audio = await self._udp_capture.get_audio(
+                self.capture_duration,
+                player_name=self._player_name,
+            )
             if audio is None:
                 logger.debug(f"UDP buffer insufficient ({self._udp_capture.buffer_seconds:.1f}s available)")
                 return "BUFFERING"
