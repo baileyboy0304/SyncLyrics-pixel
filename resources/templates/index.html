@@ -100,8 +100,14 @@
 
 
 
-<!-- Top Right Controls Container (Audio Source + Settings) -->
+<!-- Top Right Controls Container (Player + Audio Source + Settings) -->
 <div class="top-right-controls">
+    <!-- Player Toggle Button (hidden until multi-instance mode is detected) -->
+    <button id="player-toggle" class="player-toggle hidden" title="Select Player">
+        <i class="bi bi-speaker"></i>
+        <span class="player-name" id="player-name">Player</span>
+    </button>
+
     <!-- Audio Source Toggle Button -->
     <button id="source-toggle" class="source-toggle" title="Audio Source Settings">
         <span class="recording-dot" id="recording-dot"></span>
@@ -110,6 +116,33 @@
 
     <!-- Settings Toggle Button -->
     <button id="settings-toggle" class="settings-toggle" title="Display Settings"><i class="bi bi-gear"></i></button>
+</div>
+
+<!-- Player Selection Modal -->
+<div id="player-modal" class="player-modal hidden">
+    <div class="player-modal-content">
+        <div class="player-modal-header">
+            <h3>🔊 Select Player</h3>
+            <button id="player-modal-close" class="modal-close">×</button>
+        </div>
+        <div class="player-modal-body">
+            <p class="player-modal-hint">
+                Choose which speaker group's lyrics to display. Append
+                <code>?player=&lt;name&gt;</code> to the URL to pin a selection for kiosk displays.
+            </p>
+            <div id="player-list" class="player-list">
+                <!-- Populated by playerSelector.js -->
+            </div>
+            <div id="player-unassigned" class="player-unassigned hidden">
+                <h4>Unassigned streams</h4>
+                <p class="player-modal-hint">
+                    These streams were detected but aren't tied to a named player yet.
+                    Configure them in the addon's <em>players</em> list.
+                </p>
+                <ul id="player-unassigned-list" class="player-unassigned-list"></ul>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Audio Source Modal -->

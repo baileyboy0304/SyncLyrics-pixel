@@ -44,7 +44,8 @@ import {
     setPixelScrollEnabled,
     setPixelScrollSpeed,
     setLineSyncedLyrics,
-    setHasLineSync
+    setHasLineSync,
+    selectedPlayer
 } from './state.js';
 import { isLatencyBeingAdjusted } from './latency.js';
 
@@ -257,16 +258,27 @@ export async function getConfig() {
 // ========== TRACK & LYRICS ==========
 
 /**
+ * Append `?player=<name>` to a URL when a multi-instance player is selected.
+ * The backend (/current-track, /lyrics) scopes the response to that player's
+ * recognition engine when the param is present.
+ */
+function withPlayerScope(path) {
+    if (!selectedPlayer) return path;
+    const sep = path.includes('?') ? '&' : '?';
+    return `${path}${sep}player=${encodeURIComponent(selectedPlayer)}`;
+}
+
+/**
  * Fetch current track info from backend
- * 
+ *
  * @returns {Promise<Object>} Track info or error object
  */
 export async function getCurrentTrack() {
     try {
         // RTT MEASUREMENT: Record time before request for position time correction
         const startTime = performance.now();
-        
-        const response = await fetch('/current-track');
+
+        const response = await fetch(withPlayerScope('/current-track'));
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -373,7 +385,7 @@ export async function getCurrentTrack() {
  */
 export async function getLyrics(updateBackgroundFn, updateThemeColorFn, updateProviderDisplayFn) {
     try {
-        let response = await fetch('/lyrics');
+        let response = await fetch(withPlayerScope('/lyrics'));
         let data = await response.json();
 
         // Update background if colors are present

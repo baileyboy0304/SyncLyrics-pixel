@@ -54,6 +54,12 @@ export let debugBadSamples = 0;        // Count of ignored bad samples
 
 export let lastTrackInfo = null;
 export let pendingArtUrl = null;
+
+// ========== MULTI-INSTANCE PLAYER SELECTION ==========
+// Name of the player whose lyrics should be shown. null == auto (server picks).
+// Set by playerSelector.js; read by api.js to append ?player= to /current-track
+// and /lyrics so the same server can drive multiple displays.
+export let selectedPlayer = null;
 export let lastAlbumArtUrl = null;   // Raw backend URL of last loaded album art (for change detection)
 export let lastAlbumArtPath = null;  // File path of last loaded album art (most stable identifier)
 
@@ -218,3 +224,4 @@ export function setDebugLastPollTimestamp(value) { debugLastPollTimestamp = valu
 export function setDebugPollInterval(value) { debugPollInterval = value; }
 export function setDebugSource(value) { debugSource = value; }
 export function setDebugBadSamples(value) { debugBadSamples = value; }
+export function setSelectedPlayer(value) { selectedPlayer = value || null; }
