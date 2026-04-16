@@ -395,13 +395,179 @@ async def lyrics() -> dict:
         "line_synced_lyrics": line_synced_lyrics
     }
 
+def _get_player_manager_if_running():
+    """Return the PlayerManager if multi-instance mode is active, else None."""
+    import sys
+    if 'audio_recognition.player_manager' not in sys.modules:
+        return None
+    try:
+        from audio_recognition.player_manager import get_player_manager
+        mgr = get_player_manager()
+        return mgr if mgr.is_running else None
+    except Exception:
+        return None
+
+
+def _player_name_from_request() -> Optional[str]:
+    """Extract a ?player=<name> query param, trimmed and validated."""
+    name = request.args.get("player") if request else None
+    if not name:
+        return None
+    name = name.strip()
+    return name or None
+
+
+def _build_player_track_payload(player_name: str) -> Optional[dict]:
+    """
+    Build a /current-track-compatible payload directly from a player's
+    RecognitionEngine, bypassing the multi-source metadata orchestrator.
+    Returns None if the player or its song is unknown.
+    """
+    mgr = _get_player_manager_if_running()
+    if mgr is None:
+        return None
+    song = mgr.get_current_song(player_name)
+    if not song:
+        return None
+    position = mgr.get_current_position(player_name) or 0.0
+    duration_ms = song.get("duration_ms") or 0
+    artist = song.get("artist", "")
+    title = song.get("title", "")
+    metadata = {
+        "source": "audio_recognition",
+        "player": player_name,
+        "artist": artist,
+        "title": title,
+        "album": song.get("album"),
+        "album_art": song.get("album_art_url"),
+        "album_art_url": song.get("album_art_url"),
+        "artist_id": song.get("artist_id"),
+        "artist_name": song.get("artist_name") or artist,
+        "track_id": song.get("track_id"),
+        "id": song.get("id"),
+        "progress": int(position * 1000),
+        "duration": int(duration_ms),
+        "is_playing": True,
+        "isrc": song.get("isrc"),
+        "spotify_url": song.get("spotify_url"),
+        "colors": song.get("colors"),
+        "recognition_provider": song.get("recognition_provider"),
+    }
+    return metadata
+
+
+@app.route("/api/players")
+async def api_players() -> dict:
+    """
+    List configured players, discovered-but-unassigned streams, and
+    per-player engine status. Used by the settings UI to wire streams
+    to players.
+    """
+    from audio_recognition.player_registry import get_registry
+    registry = get_registry()
+    configured = [
+        {
+            "name": p.name,
+            "source_ip": p.source_ip,
+            "rtp_ssrc": f"0x{p.rtp_ssrc:08X}" if p.rtp_ssrc is not None else None,
+            "music_assistant_player_id": p.music_assistant_player_id,
+            "description": p.description,
+            "auto": p.auto,
+        }
+        for p in registry.list_players()
+    ]
+    discovered = [s.to_dict() for s in registry.list_discovered()]
+    mgr = _get_player_manager_if_running()
+    engines = mgr.list_engine_status() if mgr else []
+    streams = mgr.list_streams() if mgr else []
+    return jsonify({
+        "multi_instance_active": mgr is not None,
+        "configured": configured,
+        "discovered": discovered,
+        "engines": engines,
+        "streams": streams,
+    })
+
+
+@app.route("/api/players/<player_name>/track")
+async def api_player_track(player_name: str):
+    """Return the current track for a specific player (no fallback)."""
+    payload = _build_player_track_payload(player_name)
+    if payload is None:
+        return jsonify({"error": f"no track for player '{player_name}'"}), 404
+    return jsonify(payload)
+
+
+@app.route("/api/players/bind", methods=["POST"])
+async def api_players_bind():
+    """
+    Manually bind a discovered stream to a configured player.
+    Body: {"source_ip": "...", "ssrc": null | int | "0x...", "player": "name"}
+    """
+    try:
+        body = await request.get_json(force=True, silent=True) or {}
+    except Exception:
+        body = {}
+    source_ip = (body.get("source_ip") or "").strip()
+    player = (body.get("player") or "").strip()
+    ssrc_raw = body.get("ssrc")
+    ssrc: Optional[int] = None
+    if ssrc_raw not in (None, "", "null"):
+        try:
+            ssrc = int(str(ssrc_raw), 0) & 0xFFFFFFFF
+        except (ValueError, TypeError):
+            return jsonify({"error": "invalid ssrc"}), 400
+    if not source_ip or not player:
+        return jsonify({"error": "source_ip and player are required"}), 400
+    from audio_recognition.player_registry import get_registry
+    ok = get_registry().bind(source_ip, ssrc, player)
+    if not ok:
+        return jsonify({"error": f"unknown player '{player}'"}), 404
+    return jsonify({"ok": True})
+
+
 @app.route("/current-track")
 async def current_track() -> dict:
     """
     Returns detailed track info (Art, Progress, Duration).
     Used for the UI Header/Footer.
     Includes artist_id for visual mode and artist image fetching.
+
+    If ``?player=<name>`` is supplied and the PlayerManager knows that
+    player, the response is sourced from that player's recognition engine
+    instead of the global metadata orchestrator. This lets multiple
+    displays on the same server each show a different speaker group.
     """
+    player_scope = _player_name_from_request()
+    if not player_scope:
+        # No explicit player — if multi-instance mode is active, fall back to
+        # the first player with a live track so the default homepage still
+        # displays something useful.
+        mgr = _get_player_manager_if_running()
+        if mgr is not None:
+            for engine in mgr.list_engines().values():
+                if engine.last_result is not None:
+                    player_scope = engine.player_name
+                    break
+            if not player_scope and mgr.list_engines():
+                player_scope = next(iter(mgr.list_engines().keys()))
+
+    if player_scope:
+        scoped = _build_player_track_payload(player_scope)
+        if scoped is None:
+            return {"error": f"no track for player '{player_scope}'", "player": player_scope}
+        # Apply the same latency-compensation fields the single-player path adds.
+        latency_comp = LYRICS.get("display", {}).get("audio_recognition_latency_compensation", 0.0)
+        scoped["latency_compensation"] = latency_comp
+        scoped["word_sync_latency_compensation"] = LYRICS.get("display", {}).get("word_sync_latency_compensation", 0.0)
+        scoped["provider_word_sync_offset"] = 0.0
+        scoped["word_sync_provider"] = None
+        scoped["word_sync_default_enabled"] = settings.get("features.word_sync_default_enabled", True)
+        scoped["song_word_sync_offset"] = 0.0
+        scoped["is_instrumental"] = False
+        scoped["is_instrumental_manual"] = False
+        return scoped
+
     try:
         metadata = await get_current_song_meta_data()
         if metadata:

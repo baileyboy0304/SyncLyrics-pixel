@@ -12,17 +12,24 @@ Supported formats:
 When RTP is detected, packets are reordered via a small jitter buffer and
 lost packets are replaced with silence so the recogniser receives a coherent
 stream with correct timing.
+
+Multi-instance support:
+  A single listener socket multiplexes traffic from multiple senders. Each
+  (source IP, SSRC) pair is resolved to a "player" via the player registry;
+  each player has its own jitter buffer and rolling PCM buffer so several
+  RecognitionEngine instances can run in parallel over one UDP port.
 """
 
 import asyncio
 import struct
 import time
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
 from logging_config import get_logger
 from .capture import AudioChunk
+from .player_registry import PlayerRegistry, get_registry
 
 logger = get_logger(__name__)
 
@@ -229,6 +236,188 @@ class JitterBuffer:
         return self._samples_per_packet
 
 
+class _PlayerStream:
+    """
+    Per-player state: one jitter buffer and one rolling PCM buffer.
+
+    Each configured player gets its own instance, created lazily on first
+    packet. ``get_audio()`` is awaited by the RecognitionEngine bound to
+    this player.
+    """
+
+    def __init__(self, name: str, sample_rate: int, frame_size: int,
+                 jitter_buffer_ms: int):
+        self.name = name
+        self._sample_rate = sample_rate
+        self._frame_size = frame_size
+        self._jitter_buffer_ms = jitter_buffer_ms
+        self._max_bytes = int(MAX_BUFFER_SECONDS * sample_rate * frame_size)
+
+        self._buffer = bytearray()
+        self._total_bytes_received = 0
+        self._last_read_total = 0
+        self._last_data_time = 0.0
+
+        self._jitter_buffer: Optional[JitterBuffer] = None
+        self._rtp_detected: Optional[bool] = None
+
+        self._packets_received = 0
+        self._packets_lost = 0
+
+        self._data_event = asyncio.Event()
+
+    @property
+    def buffer_seconds(self) -> float:
+        return len(self._buffer) / (self._sample_rate * self._frame_size)
+
+    @property
+    def has_recent_data(self) -> bool:
+        return self._last_data_time > 0 and (time.time() - self._last_data_time) < 10.0
+
+    @property
+    def packet_loss_rate(self) -> float:
+        total = self._packets_received + self._packets_lost
+        return (self._packets_lost / total) if total else 0.0
+
+    def reset(self) -> None:
+        self._buffer.clear()
+        self._total_bytes_received = 0
+        self._last_read_total = 0
+        self._rtp_detected = None
+        if self._jitter_buffer:
+            self._jitter_buffer.reset()
+            self._jitter_buffer = None
+        self._packets_received = 0
+        self._packets_lost = 0
+        self._data_event.set()
+
+    # -- Ingest -------------------------------------------------------
+
+    def handle_packet(self, data: bytes, is_rtp: bool) -> None:
+        if is_rtp:
+            if self._jitter_buffer is None:
+                self._init_jitter_buffer(data)
+            self._handle_rtp(data)
+        else:
+            self._append(data)
+            self._packets_received += 1
+
+    def _init_jitter_buffer(self, data: bytes) -> None:
+        try:
+            pkt = RtpPacket(data)
+            payload_samples = len(pkt.payload) // self._frame_size
+            if payload_samples > 0:
+                packet_duration_ms = (payload_samples / self._sample_rate) * 1000
+                max_pkts = max(2, int(self._jitter_buffer_ms / packet_duration_ms))
+                max_pkts = min(max_pkts, MAX_JITTER_BUFFER_PACKETS)
+            else:
+                max_pkts = 5
+        except (ValueError, ZeroDivisionError):
+            max_pkts = 5
+
+        self._jitter_buffer = JitterBuffer(
+            max_packets=max_pkts,
+            sample_rate=self._sample_rate,
+            frame_size=self._frame_size,
+        )
+        self._rtp_detected = True
+        logger.info(
+            f"Player '{self.name}': RTP jitter buffer holds up to {max_pkts} packets"
+        )
+
+    def _handle_rtp(self, data: bytes) -> None:
+        try:
+            pkt = RtpPacket(data)
+        except ValueError as exc:
+            logger.debug(f"RTP parse error on player '{self.name}': {exc}")
+            return
+
+        self._packets_received += 1
+        results = self._jitter_buffer.push(pkt)
+        if not results:
+            results = self._jitter_buffer.flush_stale(
+                max_gap=self._jitter_buffer._max_packets * 2
+            )
+
+        for payload, lost_count in results:
+            if lost_count > 0:
+                self._packets_lost += lost_count
+                samples_per_pkt = self._jitter_buffer.samples_per_packet or 160
+                silence_bytes = lost_count * samples_per_pkt * self._frame_size
+                self._append(b'\x00' * silence_bytes)
+                logger.debug(
+                    f"Player '{self.name}': inserted {lost_count * samples_per_pkt} "
+                    f"silence samples for {lost_count} lost packet(s)"
+                )
+            if payload is not None:
+                self._append(payload)
+
+    def _append(self, data: bytes) -> None:
+        self._buffer.extend(data)
+        self._total_bytes_received += len(data)
+        self._last_data_time = time.time()
+
+        if len(self._buffer) > self._max_bytes:
+            excess = len(self._buffer) - self._max_bytes
+            del self._buffer[:excess]
+
+        self._data_event.set()
+
+    # -- Consume ------------------------------------------------------
+
+    async def get_audio(
+        self,
+        duration: float,
+        channels: int,
+        should_continue,
+    ) -> Optional[AudioChunk]:
+        needed_bytes = int(duration * self._sample_rate * self._frame_size)
+        while should_continue():
+            new_bytes = self._total_bytes_received - self._last_read_total
+            if new_bytes >= needed_bytes and len(self._buffer) >= needed_bytes:
+                break
+            self._data_event.clear()
+            try:
+                await asyncio.wait_for(self._data_event.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if not should_continue():
+                    return None
+                if self._last_data_time > 0 and (time.time() - self._last_data_time) > 10.0:
+                    logger.debug(
+                        f"Player '{self.name}': UDP stream appears dead (no data for 10s)"
+                    )
+                    return None
+
+        if not should_continue():
+            return None
+
+        self._last_read_total = self._total_bytes_received
+        audio_bytes = bytes(self._buffer[-needed_bytes:])
+        audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
+        if channels > 1:
+            audio_data = audio_data.reshape(-1, channels)
+
+        capture_start = self._last_data_time - duration
+        return AudioChunk(
+            data=audio_data,
+            sample_rate=self._sample_rate,
+            channels=channels,
+            duration=duration,
+            capture_start_time=capture_start,
+        )
+
+    def to_status_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "buffer_seconds": round(self.buffer_seconds, 2),
+            "packets_received": self._packets_received,
+            "packets_lost": self._packets_lost,
+            "packet_loss_rate": round(self.packet_loss_rate, 4),
+            "rtp_active": self._rtp_detected is True,
+            "last_data_age": (time.time() - self._last_data_time) if self._last_data_time else None,
+        }
+
+
 class UdpAudioProtocol(asyncio.DatagramProtocol):
     """asyncio datagram protocol that forwards received data to the capture buffer."""
 
@@ -236,7 +425,7 @@ class UdpAudioProtocol(asyncio.DatagramProtocol):
         self._capture = capture
 
     def datagram_received(self, data: bytes, addr: tuple) -> None:
-        self._capture.receive_data(data)
+        self._capture.receive_data(data, addr)
 
     def error_received(self, exc: Exception) -> None:
         logger.warning(f"UDP audio socket error: {exc}")
@@ -249,48 +438,38 @@ class UdpAudioProtocol(asyncio.DatagramProtocol):
 class UdpAudioCapture:
     """
     Receives PCM audio over UDP (raw or RTP-encapsulated) and provides
-    AudioChunks for the recognition engine.
+    AudioChunks for one or more recognition engines, demuxed per player.
 
-    RTP packets are automatically detected and processed through a jitter
-    buffer that reorders packets and inserts silence for any that are lost,
-    keeping the audio stream coherent and correctly timed.
+    Packet routing:
+      * RTP packets are parsed for SSRC and forwarded to the player registry
+        for binding. Raw PCM falls back to (source_ip, None).
+      * If the registry returns a player name, the packet is appended to
+        that player's jitter / rolling buffer. Unassigned packets are
+        dropped (with the stream recorded for discovery).
     """
 
     def __init__(self, port: int = 6056, sample_rate: int = 16000,
-                 channels: int = 1, jitter_buffer_ms: int = DEFAULT_JITTER_BUFFER_MS):
+                 channels: int = 1,
+                 jitter_buffer_ms: int = DEFAULT_JITTER_BUFFER_MS,
+                 registry: Optional[PlayerRegistry] = None):
         self._port = port
         self._sample_rate = sample_rate
         self._channels = channels
         self._bytes_per_sample = 2  # int16
         self._frame_size = self._bytes_per_sample * self._channels
+        self._jitter_buffer_ms = jitter_buffer_ms
 
-        # Rolling buffer
-        self._buffer = bytearray()
-        self._max_bytes = int(MAX_BUFFER_SECONDS * self._sample_rate * self._frame_size)
+        self._registry = registry or get_registry()
+        self._streams: Dict[str, _PlayerStream] = {}
+        self._streams_lock = asyncio.Lock()  # guards _streams mutation (rarely contended)
 
         self._transport: Optional[asyncio.DatagramTransport] = None
         self._running = False
-        self._last_data_time: float = 0.0
+        self._dropped_unassigned = 0
+        self._last_unassigned_log = 0.0
 
-        # Track how many bytes have been appended in total (monotonically
-        # increasing even as the rolling buffer is trimmed).  Used together
-        # with _last_read_total to know how much *new* audio has arrived
-        # since the previous get_audio() call.
-        self._total_bytes_received: int = 0
-        self._last_read_total: int = 0
-
-        # Event signalled whenever new data arrives, so get_audio() can
-        # async-wait instead of polling.
-        self._data_event: asyncio.Event = asyncio.Event()
-
-        # RTP state
-        self._rtp_detected: Optional[bool] = None  # None = not yet determined
-        self._jitter_buffer_ms = jitter_buffer_ms
-        self._jitter_buffer: Optional[JitterBuffer] = None
-
-        # Stats
-        self._packets_received: int = 0
-        self._packets_lost: int = 0
+    # ------------------------------------------------------------------
+    # Properties — aggregate across all player streams for legacy callers
 
     @property
     def is_running(self) -> bool:
@@ -298,223 +477,160 @@ class UdpAudioCapture:
 
     @property
     def has_data(self) -> bool:
-        """True if any audio data has been received recently (within last 10s)."""
-        return self._last_data_time > 0 and (time.time() - self._last_data_time) < 10.0
+        return any(s.has_recent_data for s in self._streams.values())
 
     @property
     def buffer_seconds(self) -> float:
-        """Current amount of buffered audio in seconds."""
-        return len(self._buffer) / (self._sample_rate * self._frame_size)
+        if not self._streams:
+            return 0.0
+        return max((s.buffer_seconds for s in self._streams.values()), default=0.0)
 
     @property
     def rtp_active(self) -> bool:
-        """True if RTP encapsulation was detected on the incoming stream."""
-        return self._rtp_detected is True
+        return any(s._rtp_detected is True for s in self._streams.values())
 
     @property
     def packet_loss_rate(self) -> float:
-        """Fraction of packets lost (0.0-1.0), or 0 if no packets yet."""
-        total = self._packets_received + self._packets_lost
-        if total == 0:
-            return 0.0
-        return self._packets_lost / total
+        total_recv = sum(s._packets_received for s in self._streams.values())
+        total_lost = sum(s._packets_lost for s in self._streams.values())
+        total = total_recv + total_lost
+        return (total_lost / total) if total else 0.0
+
+    def list_streams(self) -> list[dict]:
+        return [s.to_status_dict() for s in self._streams.values()]
+
+    # ------------------------------------------------------------------
+    # Lifecycle
 
     async def start(self) -> None:
-        """Start listening for UDP audio on the configured port."""
         if self._running:
             return
-
         loop = asyncio.get_running_loop()
         self._transport, _ = await loop.create_datagram_endpoint(
             lambda: UdpAudioProtocol(self),
-            local_addr=('0.0.0.0', self._port)
+            local_addr=('0.0.0.0', self._port),
         )
         self._running = True
-        logger.info(f"UDP audio listener started on port {self._port} "
-                     f"({self._sample_rate}Hz, {self._channels}ch, 16-bit, "
-                     f"RTP auto-detect enabled, jitter buffer {self._jitter_buffer_ms}ms)")
+        logger.info(
+            f"UDP audio listener started on port {self._port} "
+            f"({self._sample_rate}Hz, {self._channels}ch, 16-bit, "
+            f"RTP auto-detect, jitter buffer {self._jitter_buffer_ms}ms, "
+            f"multi-player demux enabled)"
+        )
 
     async def stop(self) -> None:
-        """Stop the UDP listener and clear the buffer."""
         if self._transport:
             self._transport.close()
             self._transport = None
         self._running = False
-        self._buffer.clear()
-        self._total_bytes_received = 0
-        self._last_read_total = 0
-        self._rtp_detected = None
-        if self._jitter_buffer:
-            self._jitter_buffer.reset()
-            self._jitter_buffer = None
-        self._packets_received = 0
-        self._packets_lost = 0
-        self._data_event.set()  # Unblock any waiting get_audio() call
+        for stream in self._streams.values():
+            stream.reset()
+        self._streams.clear()
         logger.info("UDP audio listener stopped")
 
-    def receive_data(self, data: bytes) -> None:
-        """Called by the protocol when a UDP packet is received."""
-        # Auto-detect RTP on first packet
-        if self._rtp_detected is None:
-            self._rtp_detected = self._detect_rtp(data)
-            if self._rtp_detected:
-                # Calculate jitter buffer size in packets based on first packet
-                try:
-                    pkt = RtpPacket(data)
-                    payload_samples = len(pkt.payload) // self._frame_size
-                    if payload_samples > 0:
-                        packet_duration_ms = (payload_samples / self._sample_rate) * 1000
-                        max_pkts = max(2, int(self._jitter_buffer_ms / packet_duration_ms))
-                        max_pkts = min(max_pkts, MAX_JITTER_BUFFER_PACKETS)
-                    else:
-                        max_pkts = 5
-                except (ValueError, ZeroDivisionError):
-                    max_pkts = 5
+    # ------------------------------------------------------------------
+    # Packet routing (called from the datagram protocol)
 
-                self._jitter_buffer = JitterBuffer(
-                    max_packets=max_pkts,
-                    sample_rate=self._sample_rate,
-                    frame_size=self._frame_size,
+    def receive_data(self, data: bytes, addr: Tuple[str, int]) -> None:
+        source_ip, source_port = addr[0], addr[1]
+
+        # Peek RTP header (if any) without mutating state
+        is_rtp = _looks_like_rtp(data)
+        ssrc: Optional[int] = None
+        payload_type: Optional[int] = None
+        if is_rtp:
+            try:
+                ssrc = struct.unpack_from('!I', data, 8)[0]
+                payload_type = data[1] & 0x7F
+            except (struct.error, IndexError):
+                ssrc = None
+
+        player_name = self._registry.resolve(source_ip, source_port, ssrc, payload_type)
+        if player_name is None:
+            self._dropped_unassigned += 1
+            now = time.time()
+            # Rate-limit the "unassigned" warning to once every 30s
+            if now - self._last_unassigned_log > 30.0:
+                logger.info(
+                    f"UDP packet from {source_ip}:{source_port} "
+                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}) "
+                    f"is unassigned — configure a player or enable auto-discover. "
+                    f"Total dropped: {self._dropped_unassigned}"
                 )
-                logger.info(f"RTP encapsulation detected — jitter buffer "
-                            f"holds up to {max_pkts} packets")
-            else:
-                logger.info("Raw PCM detected on UDP stream (no RTP headers)")
-
-        if self._rtp_detected:
-            self._handle_rtp_packet(data)
-        else:
-            self._handle_raw_pcm(data)
-
-    def _detect_rtp(self, data: bytes) -> bool:
-        """Heuristic: check if the packet looks like a valid RTP packet."""
-        if len(data) < RTP_HEADER_MIN_SIZE:
-            return False
-        version = (data[0] >> 6) & 0x03
-        if version != RTP_VERSION:
-            return False
-        # Payload type should be in a reasonable range for audio
-        pt = data[1] & 0x7F
-        # L16 mono = 11, L16 stereo = 10, dynamic = 96-127
-        # Accept any valid PT — senders may use dynamic types
-        if pt > 127:
-            return False
-        # The payload after the header should be non-empty
-        cc = data[0] & 0x0F
-        header_len = RTP_HEADER_MIN_SIZE + cc * 4
-        if len(data) <= header_len:
-            return False
-        return True
-
-    def _handle_rtp_packet(self, data: bytes) -> None:
-        """Parse RTP, feed jitter buffer, append ordered audio to rolling buffer."""
-        try:
-            pkt = RtpPacket(data)
-        except ValueError as exc:
-            logger.debug(f"RTP parse error: {exc}")
+                self._last_unassigned_log = now
             return
 
-        self._packets_received += 1
-        results = self._jitter_buffer.push(pkt)
-
-        # Also flush if buffer has grown stale
-        if not results:
-            results = self._jitter_buffer.flush_stale(
-                max_gap=self._jitter_buffer._max_packets * 2
+        stream = self._streams.get(player_name)
+        if stream is None:
+            stream = _PlayerStream(
+                name=player_name,
+                sample_rate=self._sample_rate,
+                frame_size=self._frame_size,
+                jitter_buffer_ms=self._jitter_buffer_ms,
+            )
+            self._streams[player_name] = stream
+            logger.info(
+                f"Player stream created: '{player_name}' "
+                f"(first packet from {source_ip}:{source_port})"
             )
 
-        for payload, lost_count in results:
-            if lost_count > 0:
-                # Insert silence for lost packets
-                self._packets_lost += lost_count
-                samples_per_pkt = self._jitter_buffer.samples_per_packet or 160
-                silence_bytes = lost_count * samples_per_pkt * self._frame_size
-                self._append_audio(b'\x00' * silence_bytes)
-                logger.debug(f"RTP: inserted {lost_count * samples_per_pkt} "
-                             f"silence samples for {lost_count} lost packet(s)")
+        stream.handle_packet(data, is_rtp)
 
-            if payload is not None:
-                self._append_audio(payload)
+    # ------------------------------------------------------------------
+    # Consumer API
 
-    def _handle_raw_pcm(self, data: bytes) -> None:
-        """Legacy path: append raw PCM bytes directly."""
-        self._packets_received += 1
-        self._append_audio(data)
-
-    def _append_audio(self, data: bytes) -> None:
-        """Append audio bytes to the rolling buffer and update bookkeeping."""
-        self._buffer.extend(data)
-        self._total_bytes_received += len(data)
-        self._last_data_time = time.time()
-
-        # Evict oldest data if buffer exceeds limit
-        if len(self._buffer) > self._max_bytes:
-            excess = len(self._buffer) - self._max_bytes
-            del self._buffer[:excess]
-
-        # Wake up any waiting get_audio() call
-        self._data_event.set()
-
-    async def get_audio(self, duration: float) -> Optional[AudioChunk]:
+    async def get_audio(self, duration: float,
+                         player_name: Optional[str] = None) -> Optional[AudioChunk]:
         """
-        Wait for a full ``duration`` of *fresh* audio, then return it.
+        Return ``duration`` seconds of fresh audio for the given player.
 
-        Behaves like the blocking mic/loopback capture: the caller is
-        suspended until enough new real-time audio has been received via
-        UDP.  This prevents the recogniser from being fed overlapping
-        near-duplicate chunks when the engine polls faster than audio
-        arrives.
-
-        Returns None if the listener is stopped while waiting or the
-        stream goes dead (no data for 10 s).
-
-        Args:
-            duration: Desired audio duration in seconds.
-
-        Returns:
-            AudioChunk, or None if the stream stopped.
+        Legacy callers that omit ``player_name`` get the default player
+        (first known stream, or the registry-provided default).
         """
-        needed_bytes = int(duration * self._sample_rate * self._frame_size)
-
-        # Wait until a full duration of *new* audio has arrived since the
-        # last chunk was returned — just like the mic blocks on hardware.
-        while self._running:
-            new_bytes = self._total_bytes_received - self._last_read_total
-            if new_bytes >= needed_bytes and len(self._buffer) >= needed_bytes:
-                break
-
-            # Wait for more data to arrive
-            self._data_event.clear()
-            try:
-                await asyncio.wait_for(self._data_event.wait(), timeout=1.0)
-            except asyncio.TimeoutError:
-                # Check if stream is still alive
-                if not self._running:
-                    return None
-                if self._last_data_time > 0 and (time.time() - self._last_data_time) > 10.0:
-                    logger.debug("UDP stream appears dead (no data for 10s)")
-                    return None
-
-        if not self._running:
+        target = player_name or self._default_player_name()
+        if target is None:
             return None
 
-        self._last_read_total = self._total_bytes_received
+        stream = self._streams.get(target)
+        if stream is None:
+            # No packets seen for this player yet — block briefly to see if
+            # they arrive. We register an empty stream so receive_data() can
+            # populate it as soon as the first packet lands.
+            stream = _PlayerStream(
+                name=target,
+                sample_rate=self._sample_rate,
+                frame_size=self._frame_size,
+                jitter_buffer_ms=self._jitter_buffer_ms,
+            )
+            self._streams[target] = stream
 
-        audio_bytes = bytes(self._buffer[-needed_bytes:])
-        audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
-
-        if self._channels > 1:
-            audio_data = audio_data.reshape(-1, self._channels)
-
-        # Anchor capture_start_time to when the audio actually arrived,
-        # matching mic behaviour where capture_start = time.time() before
-        # the blocking read.
-        capture_start = self._last_data_time - duration
-
-        return AudioChunk(
-            data=audio_data,
-            sample_rate=self._sample_rate,
-            channels=self._channels,
+        return await stream.get_audio(
             duration=duration,
-            capture_start_time=capture_start,
+            channels=self._channels,
+            should_continue=lambda: self._running,
         )
+
+    def _default_player_name(self) -> Optional[str]:
+        if self._streams:
+            return next(iter(self._streams.keys()))
+        players = self._registry.list_players()
+        if not players:
+            default = self._registry.ensure_default_player()
+            return default.name
+        return players[0].name
+
+
+def _looks_like_rtp(data: bytes) -> bool:
+    """Cheap header-only RTP heuristic used for routing decisions."""
+    if len(data) < RTP_HEADER_MIN_SIZE:
+        return False
+    if ((data[0] >> 6) & 0x03) != RTP_VERSION:
+        return False
+    pt = data[1] & 0x7F
+    if pt > 127:
+        return False
+    cc = data[0] & 0x0F
+    header_len = RTP_HEADER_MIN_SIZE + cc * 4
+    if len(data) <= header_len:
+        return False
+    return True

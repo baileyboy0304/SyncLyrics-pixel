@@ -289,6 +289,20 @@ async def cleanup() -> None:
         except Exception as e:
             logger.error(f"Error unregistering mDNS: {e}")
 
+    # Stop multi-instance PlayerManager first (if it was started).
+    if 'audio_recognition.player_manager' in sys.modules:
+        try:
+            from audio_recognition.player_manager import get_player_manager
+            mgr = get_player_manager()
+            if mgr.is_running:
+                logger.debug("CLEANUP: Stopping PlayerManager...")
+                await asyncio.wait_for(mgr.stop(), timeout=5.0)
+                logger.debug("CLEANUP: PlayerManager stopped")
+        except asyncio.TimeoutError:
+            logger.warning("CLEANUP: PlayerManager stop timed out")
+        except Exception as e:
+            logger.error(f"Failed to stop PlayerManager: {e}")
+
     # Stop audio recognition engine FIRST (most likely to hang)
     # FIX: Only attempt to stop if the module was ever imported (i.e., audio rec was used)
     # This prevents PortAudio initialization on shutdown when audio rec was never enabled
@@ -621,32 +635,66 @@ async def main() -> NoReturn:
     else:
         logger.info("System tray disabled (headless mode or missing dependency).")
     
-    # Start audio recognition if --reaper flag was used
-    # Check runtime flag (set by --reaper or config) to avoid importing audio_recognition unnecessarily
-    from system_utils.metadata import _audio_rec_runtime_enabled
-    if _audio_rec_runtime_enabled:
+    # Multi-instance players: if the user configured one or more players under
+    # the `players` key, take that path and skip the legacy single-engine
+    # Reaper source. PlayerManager owns a shared UDP listener and runs one
+    # RecognitionEngine per player, demuxing by source IP / RTP SSRC.
+    from config import AUDIO_RECOGNITION, PLAYERS, UDP_AUDIO
+    from audio_recognition.player_registry import get_registry
+    get_registry().load_from_config(
+        PLAYERS.get("configured", []),
+        auto_discover=PLAYERS.get("auto_discover", True),
+    )
+
+    multi_instance_mode = bool(PLAYERS.get("configured")) and UDP_AUDIO.get("enabled", False)
+
+    if multi_instance_mode:
         try:
-            from system_utils.reaper import get_reaper_source
-            source = get_reaper_source()
-            await source.start(manual=True)
-            logger.info("Audio recognition started (--reaper mode)")
-        except Exception as e:
-            logger.error(f"Failed to start audio recognition: {e}")
-            # Disable audio rec for this session to prevent further attempts
+            from audio_recognition.player_manager import get_player_manager
             from system_utils.metadata import set_audio_rec_runtime_enabled
-            set_audio_rec_runtime_enabled(False, False)
-            logger.info("Audio recognition disabled for this session")
-    
-    # Start Reaper auto-detect background task if enabled in settings
-    # This is SEPARATE from --reaper flag - runs a lightweight check every 30s
-    from config import AUDIO_RECOGNITION
-    if AUDIO_RECOGNITION.get("reaper_auto_detect", False):
-        try:
-            from system_utils.reaper import start_reaper_auto_detect
-            await start_reaper_auto_detect()
-            logger.info("Reaper auto-detect enabled")
+            set_audio_rec_runtime_enabled(True, False)
+            manager = get_player_manager()
+            await manager.start(
+                players=get_registry().list_players(),
+                udp_port=UDP_AUDIO["port"],
+                sample_rate=UDP_AUDIO["sample_rate"],
+                jitter_buffer_ms=UDP_AUDIO.get("jitter_buffer_ms", 60),
+                recognition_interval=AUDIO_RECOGNITION.get("recognition_interval", 5.0),
+                capture_duration=AUDIO_RECOGNITION.get("capture_duration", 6.0),
+                latency_offset=AUDIO_RECOGNITION.get("latency_offset", 0.0),
+            )
+            logger.info(
+                f"Multi-instance mode: PlayerManager running with "
+                f"{len(manager.list_engines())} player(s) on UDP port {UDP_AUDIO['port']}"
+            )
         except Exception as e:
-            logger.error(f"Failed to start Reaper auto-detect: {e}")
+            logger.error(f"Failed to start PlayerManager: {e}", exc_info=True)
+    else:
+        # Start audio recognition if --reaper flag was used
+        # Check runtime flag (set by --reaper or config) to avoid importing audio_recognition unnecessarily
+        from system_utils.metadata import _audio_rec_runtime_enabled
+        if _audio_rec_runtime_enabled:
+            try:
+                from system_utils.reaper import get_reaper_source
+                source = get_reaper_source()
+                await source.start(manual=True)
+                logger.info("Audio recognition started (--reaper mode)")
+            except Exception as e:
+                logger.error(f"Failed to start audio recognition: {e}")
+                # Disable audio rec for this session to prevent further attempts
+                from system_utils.metadata import set_audio_rec_runtime_enabled
+                set_audio_rec_runtime_enabled(False, False)
+                logger.info("Audio recognition disabled for this session")
+
+        # Start Reaper auto-detect background task if enabled in settings
+        # This is SEPARATE from --reaper flag - runs a lightweight check every 30s
+        if AUDIO_RECOGNITION.get("reaper_auto_detect", False):
+            try:
+                from system_utils.reaper import start_reaper_auto_detect
+                await start_reaper_auto_detect()
+                logger.info("Reaper auto-detect enabled")
+            except Exception as e:
+                logger.error(f"Failed to start Reaper auto-detect: {e}")
 
     # Get active display methods
     # CRITICAL FIX: Use .get() with default to prevent crash if state file is missing representationMethods key
