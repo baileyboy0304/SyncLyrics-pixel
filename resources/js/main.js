@@ -101,6 +101,7 @@ import {
 
 // Provider (Level 3)
 import { setupProviderUI, updateProviderDisplay, updateStyleButtonsInModal, updateInstrumentalButtonState, initWordSyncStyle } from './modules/provider.js';
+import { setupPlayerUI, refreshPlayers, recordCurrentTrackPlayer } from './modules/playerSelector.js';
 
 // Audio Source (Level 3)
 import audioSource from './modules/audioSource.js';
@@ -416,6 +417,12 @@ async function updateLoop() {
         ]);
 
         setLastCheckTime(Date.now());
+
+        // Inform the player selector which player the server is currently
+        // sourcing from (so the badge reflects reality in auto mode).
+        if (trackInfo && trackInfo.player) {
+            recordCurrentTrackPlayer(trackInfo.player);
+        }
 
         // Fix 4.1: Update audio source button with current track source
         // NOTE: When audio_recognition is active, audioSource.js handles the source button
@@ -741,6 +748,10 @@ async function main() {
     attachControlHandlers(enterVisualMode, exitVisualMode);
     attachProgressBarSeek();  // Enable click-to-seek on progress bar
     setupProviderUI();
+    setupPlayerUI();      // Multi-instance player selector (no-op in single-player mode)
+    // Poll /api/players occasionally so newly discovered streams surface
+    // without requiring a full page reload.
+    setInterval(() => { refreshPlayers(); }, 15000);
     initWordSyncStyle();  // Initialize word-sync style from localStorage
     setupQueueInteractions();
     setupTouchControls();
