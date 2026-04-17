@@ -609,12 +609,27 @@ class RecognitionEngine:
             return None
         
         # Update audio level for UI meter (normalize int16 amplitude to 0.0-1.0)
+        max_amp = 0
         try:
             max_amp = audio.get_max_amplitude()
             # Max amplitude for int16 is 32768, amplify slightly for visibility
             self._last_audio_level = min(1.0, (max_amp / 32768.0) * 2.0)
         except Exception:
             self._last_audio_level = 0.0
+
+        # Diagnostic: per-capture audio level so it's clear at INFO whether
+        # real signal is reaching the engine. UDP streams that decode silence
+        # (wrong codec / sample-rate / garbled payload) will show max_amp≈0
+        # even though packets are arriving.
+        try:
+            sig_desc = "silent" if max_amp < 100 else "signal"
+            logger.info(
+                f"Capture: player={self._player_name or 'default'} "
+                f"duration={audio.duration:.1f}s sr={audio.sample_rate} "
+                f"max_amp={max_amp} ({sig_desc})"
+            )
+        except Exception:
+            pass
         
         if audio.is_silent():
             logger.debug("Audio is silent, skipping recognition")

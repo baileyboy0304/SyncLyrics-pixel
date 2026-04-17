@@ -321,6 +321,14 @@ class _PlayerStream:
             frame_size=self._frame_size,
         )
         self._rtp_detected = True
+        # Remember the first packet's RTP timestamp + wallclock so we can
+        # sanity-check the sender's sample rate against our configured one.
+        # A common failure mode is a sender running at 48 kHz while the
+        # addon is configured for 16 kHz — the raw PCM decodes, but at the
+        # wrong rate so Shazam never matches.
+        self._first_rtp_ts: Optional[int] = getattr(pkt, 'timestamp', None)
+        self._first_rtp_wall: float = time.time()
+        self._sr_check_done: bool = False
         logger.info(
             f"Player '{self.name}': RTP jitter buffer holds up to {max_pkts} packets"
         )
@@ -333,6 +341,34 @@ class _PlayerStream:
             return
 
         self._packets_received += 1
+
+        # After ~3 seconds of wall-clock, compare RTP timestamp advance to
+        # the configured sample rate. A big mismatch means the sender is
+        # running at a different rate than this addon expects — log a loud
+        # warning so the user can see it.
+        if (not self._sr_check_done and self._first_rtp_ts is not None
+                and self._packets_received > 10):
+            elapsed = time.time() - self._first_rtp_wall
+            if elapsed >= 3.0:
+                ts_delta = (pkt.timestamp - self._first_rtp_ts) & 0xFFFFFFFF
+                if ts_delta > 0:
+                    observed_rate = ts_delta / elapsed
+                    ratio = observed_rate / self._sample_rate
+                    logger.info(
+                        f"Player '{self.name}': RTP clock check — "
+                        f"configured {self._sample_rate} Hz, "
+                        f"observed {observed_rate:.0f} Hz "
+                        f"({ratio:.2f}x) over {elapsed:.1f}s"
+                    )
+                    if ratio < 0.8 or ratio > 1.25:
+                        logger.warning(
+                            f"Player '{self.name}': sender sample rate "
+                            f"({observed_rate:.0f} Hz) doesn't match configured "
+                            f"{self._sample_rate} Hz — Shazam will not match. "
+                            f"Set udp_audio_sample_rate to {int(round(observed_rate))} "
+                            f"in the addon config."
+                        )
+                self._sr_check_done = True
         results = self._jitter_buffer.push(pkt)
         if not results:
             results = self._jitter_buffer.flush_stale(
