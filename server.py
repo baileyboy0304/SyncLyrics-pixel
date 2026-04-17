@@ -2990,15 +2990,59 @@ async def audio_recognition_status():
     """
     Get audio recognition status.
     Returns current state, mode, song info, and device configuration.
-    
+
     CRITICAL FIX: Only import reaper/audio_recognition if:
     1. The module was already imported (audio rec was used), OR
     2. Audio recognition is explicitly enabled in config
-    
+
     This prevents PortAudio initialization from frontend polling when audio rec is disabled.
     """
     import sys
-    
+
+    # Multi-instance UDP mode: PlayerManager owns the UDP port and drives
+    # recognition per player. Surface its aggregate state so the Audio Source
+    # modal reflects reality instead of the stale reaper-source idle stub.
+    mgr = _get_player_manager_if_running()
+    if mgr is not None:
+        engines = mgr.list_engines()
+        live_engine = None
+        for e in engines.values():
+            if e.get_current_song():
+                live_engine = e
+                break
+        current_song = None
+        mode_str = "idle"
+        state_str = "idle"
+        if live_engine is not None:
+            song = live_engine.get_current_song() or {}
+            current_song = {
+                "artist": song.get("artist"),
+                "title": song.get("title"),
+                "album": song.get("album"),
+                "album_art_url": song.get("album_art_url"),
+                "recognition_provider": song.get("recognition_provider", "shazam"),
+            }
+            mode_str = "udp"
+            state_str = "listening"
+        elif engines:
+            mode_str = "udp"
+            state_str = "listening"
+        return jsonify({
+            "available": True,
+            "enabled": True,
+            "active": bool(engines),
+            "running": bool(engines),
+            "mode": mode_str,
+            "state": state_str,
+            "udp_multi_instance": True,
+            "player_count": len(engines),
+            "reaper_detected": False,
+            "auto_detect": False,
+            "manual_mode": False,
+            "capture_mode": "udp",
+            "current_song": current_song,
+        })
+
     # Check if reaper module was ever imported (meaning audio rec was actually used)
     if 'system_utils.reaper' not in sys.modules:
         # Module not imported - check if we should import it
@@ -3047,15 +3091,27 @@ async def audio_recognition_start():
     Start audio recognition manually.
     Body: {"manual": true} (optional, defaults to true for manual trigger)
     """
+    # In multi-instance UDP mode the PlayerManager already owns port 6056;
+    # letting the reaper engine start a second UDP listener just races and
+    # fails with EADDRINUSE. Report success so the UI switches to "running".
+    mgr = _get_player_manager_if_running()
+    if mgr is not None:
+        return jsonify({
+            "status": "started",
+            "mode": "udp",
+            "udp_multi_instance": True,
+            "message": "Recognition is already running via UDP multi-instance mode.",
+        })
+
     try:
         from system_utils.reaper import get_reaper_source
-        
+
         data = await request.get_json() or {}
         manual = data.get("manual", True)
-        
+
         source = get_reaper_source()
         await source.start(manual=manual)
-        
+
         return jsonify({
             "status": "started",
             "mode": "manual" if manual else "reaper"
@@ -3074,12 +3130,22 @@ async def audio_recognition_start():
 @app.route('/api/audio-recognition/stop', methods=['POST'])
 async def audio_recognition_stop():
     """Stop audio recognition."""
+    # Refuse to tear down the shared PlayerManager from a reaper-style
+    # "stop" click — it owns per-player engines and the UDP socket.
+    mgr = _get_player_manager_if_running()
+    if mgr is not None:
+        return jsonify({
+            "status": "running",
+            "udp_multi_instance": True,
+            "message": "UDP multi-instance mode is active; stop via addon config.",
+        })
+
     try:
         from system_utils.reaper import get_reaper_source
-        
+
         source = get_reaper_source()
         await source.stop()
-        
+
         return jsonify({"status": "stopped"})
         
     except ImportError as e:
