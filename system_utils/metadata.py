@@ -7,6 +7,7 @@ Dependencies: state, helpers, image, album_art, windows, spotify
 from __future__ import annotations
 import os
 import platform
+import sys
 import time
 import asyncio
 import shutil
@@ -283,7 +284,79 @@ async def get_current_song_meta_data() -> Optional[dict]:
         except Exception as e:
             logger.error(f"Audio recognition check failed: {e}")
         # ========================================================================
-        
+
+        # ========================================================================
+        # MULTI-INSTANCE PLAYER MANAGER FALLBACK
+        # When udp_audio is enabled, PlayerManager runs independent engines per
+        # RTP stream. The reaper source above won't fire in this mode, so pull
+        # the first active player's song into the orchestrator so lyrics can
+        # key off it just like the single-instance audio_recognition path.
+        # ========================================================================
+        if result is None and 'audio_recognition.player_manager' in sys.modules:
+            try:
+                from audio_recognition.player_manager import get_player_manager
+                mgr = get_player_manager()
+                if mgr.is_running:
+                    engines = mgr.list_engines()
+                    live_engine = None
+                    for engine in engines.values():
+                        if engine.get_current_song():
+                            live_engine = engine
+                            break
+                    if live_engine is not None:
+                        song = live_engine.get_current_song() or {}
+                        position = live_engine.get_current_position() or 0.0
+                        duration_ms = song.get("duration_ms") or 0
+                        duration_sec = duration_ms // 1000 if duration_ms else 0
+                        colors = song.get("colors") or ("#24273a", "#363b54")
+                        pm_result = {
+                            "artist": song.get("artist", ""),
+                            "title": song.get("title", ""),
+                            "album": song.get("album"),
+                            "position": position,
+                            "duration": duration_sec,
+                            "duration_ms": duration_ms,
+                            "is_playing": True,
+                            "source": "audio_recognition",
+                            "recognition_provider": song.get("recognition_provider", "shazam"),
+                            "id": song.get("id"),
+                            "track_id": song.get("track_id"),
+                            "artist_id": song.get("artist_id"),
+                            "artist_name": song.get("artist_name") or song.get("artist"),
+                            "url": song.get("url") or song.get("spotify_url"),
+                            "isrc": song.get("isrc"),
+                            "shazam_url": song.get("shazam_url"),
+                            "spotify_url": song.get("spotify_url"),
+                            "background_image_url": song.get("background_image_url"),
+                            "genre": song.get("genre"),
+                            "shazam_lyrics_text": song.get("shazam_lyrics_text"),
+                            "album_art_url": song.get("album_art_url"),
+                            "colors": colors,
+                            "shuffle_state": None,
+                            "repeat_state": None,
+                            "_player_manager": True,
+                            "_player_name": getattr(live_engine, "player_name", None),
+                        }
+                        cached_result = getattr(get_current_song_meta_data, '_last_result', None)
+                        if (cached_result
+                                and cached_result.get('source') == 'audio_recognition'
+                                and cached_result.get('artist') == pm_result['artist']
+                                and cached_result.get('title') == pm_result['title']
+                                and cached_result.get('_audio_rec_enriched')):
+                            cached_result['position'] = pm_result['position']
+                            cached_result['is_playing'] = True
+                            return cached_result
+                        result = pm_result
+                        get_current_song_meta_data._last_result = result
+                        result['_enrichment_in_progress'] = True
+                        get_current_song_meta_data._last_check_time = time.time()
+                        get_current_song_meta_data._last_song = f"{result['artist']} - {result['title']}"
+                        get_current_song_meta_data._is_active = True
+                        get_current_song_meta_data._last_active_time = time.time()
+            except Exception as e:
+                logger.error(f"PlayerManager metadata fallback failed: {e}")
+        # ========================================================================
+
         # Check if audio recognition already provided a valid result
         # If so, skip Windows/Spotify source polling but still respect normal cache interval
         audio_rec_success = result is not None and result.get('source') == 'audio_recognition'
