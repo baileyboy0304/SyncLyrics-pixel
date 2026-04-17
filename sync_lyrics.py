@@ -635,18 +635,38 @@ async def main() -> NoReturn:
     else:
         logger.info("System tray disabled (headless mode or missing dependency).")
     
-    # Multi-instance players: if the user configured one or more players under
-    # the `players` key, take that path and skip the legacy single-engine
-    # Reaper source. PlayerManager owns a shared UDP listener and runs one
-    # RecognitionEngine per player, demuxing by source IP / RTP SSRC.
+    # Multi-instance players: always start the PlayerManager when UDP audio
+    # is enabled. New RTP streams auto-register as players via the registry,
+    # so the user never has to edit YAML — friendly names are assigned from
+    # Music Assistant (when reachable) or renamed from the UI.
     from config import AUDIO_RECOGNITION, PLAYERS, UDP_AUDIO
     from audio_recognition.player_registry import get_registry
-    get_registry().load_from_config(
+    registry = get_registry()
+    # Point the registry at a persistent JSON file so auto-players and any
+    # UI-side renames survive addon restarts. HA addons have /data writable;
+    # fall back to the local directory when running outside the addon.
+    persistence_candidates = [
+        os.getenv("SYNCLYRICS_PLAYERS_FILE"),
+        "/data/players.json",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "players.json"),
+    ]
+    for candidate in persistence_candidates:
+        if not candidate:
+            continue
+        try:
+            parent = os.path.dirname(candidate) or "."
+            os.makedirs(parent, exist_ok=True)
+            registry.set_persistence_path(candidate)
+            logger.info(f"PlayerRegistry persistence: {candidate}")
+            break
+        except Exception:
+            continue
+    registry.load_from_config(
         PLAYERS.get("configured", []),
         auto_discover=PLAYERS.get("auto_discover", True),
     )
 
-    multi_instance_mode = bool(PLAYERS.get("configured")) and UDP_AUDIO.get("enabled", False)
+    multi_instance_mode = UDP_AUDIO.get("enabled", False)
 
     if multi_instance_mode:
         try:

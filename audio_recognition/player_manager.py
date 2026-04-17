@@ -1,14 +1,18 @@
 """
 Player Manager
 
-Coordinates multiple RecognitionEngine instances — one per configured player —
+Coordinates multiple RecognitionEngine instances — one per known player —
 sharing a single UdpAudioCapture listener. The capture demuxes incoming RTP
 packets to the right player's jitter/ring buffer via the PlayerRegistry.
 
+In the UX-first (no-YAML) flow, the registry auto-creates a player the first
+time a new RTP stream arrives. A registry observer wired up in ``start()``
+tells the manager to spawn an engine for that player on the fly.
+
 Lifecycle:
   manager = PlayerManager()
-  await manager.start(player_configs, shared_enrichers)  # creates N engines
-  ...
+  await manager.start(player_configs, ...)     # zero or more players
+  ...                                          # engines spawn dynamically
   await manager.stop()
 
 Query:
@@ -40,6 +44,12 @@ class PlayerManager:
         self._engines: Dict[str, RecognitionEngine] = {}
         self._lock = asyncio.Lock()
         self._running = False
+        # Cached engine-construction args so dynamic spawns match the
+        # configuration the caller supplied at start().
+        self._engine_kwargs: Dict[str, Any] = {}
+        self._on_song_change: Optional[Callable[[str, Any], None]] = None
+        # Event loop for thread-safe spawn scheduling from the UDP thread.
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -58,7 +68,9 @@ class PlayerManager:
         title_search_enricher: Optional[Callable[[str, str, Optional[str]], Any]] = None,
         on_song_change: Optional[Callable[[str, Any], None]] = None,
     ) -> None:
-        """Start the shared UDP capture and spawn one engine per player."""
+        """Start the shared UDP capture and spawn an engine for every player
+        that's already in the registry. New auto-players will get engines
+        spawned on demand via the registry observer."""
         async with self._lock:
             if self._running:
                 logger.debug("PlayerManager already running")
@@ -66,9 +78,6 @@ class PlayerManager:
 
             registry = get_registry()
             player_list: List[PlayerConfig] = list(players)
-            if not player_list:
-                default = registry.ensure_default_player()
-                player_list = [default]
 
             self._udp_capture = UdpAudioCapture(
                 port=udp_port,
@@ -83,30 +92,31 @@ class PlayerManager:
                 self._udp_capture = None
                 return
 
-            for p in player_list:
-                if p.name in self._engines:
-                    continue
-                engine = RecognitionEngine(
-                    recognition_interval=recognition_interval,
-                    capture_duration=capture_duration,
-                    latency_offset=latency_offset,
-                    metadata_enricher=metadata_enricher,
-                    title_search_enricher=title_search_enricher,
-                    on_song_change=_wrap_song_change(on_song_change, p.name),
-                    player_name=p.name,
-                    shared_udp_capture=self._udp_capture,
-                )
-                try:
-                    await engine.start()
-                except Exception as exc:
-                    logger.error(
-                        f"PlayerManager: failed to start engine for player '{p.name}': {exc}"
-                    )
-                    continue
-                self._engines[p.name] = engine
-                logger.info(f"PlayerManager: engine started for player '{p.name}'")
+            self._engine_kwargs = {
+                "recognition_interval": recognition_interval,
+                "capture_duration": capture_duration,
+                "latency_offset": latency_offset,
+                "metadata_enricher": metadata_enricher,
+                "title_search_enricher": title_search_enricher,
+            }
+            self._on_song_change = on_song_change
+            self._loop = asyncio.get_running_loop()
 
-            self._running = bool(self._engines)
+            # Spawn engines for the players that already exist (either from
+            # config or restored from the persisted auto-player JSON).
+            for p in player_list:
+                await self._spawn_engine_locked(p.name)
+
+            # Wire the observer so newly auto-created players get engines.
+            registry.add_player_added_listener(self._on_player_added_from_registry)
+
+            # Consider ourselves running as soon as the socket is up, even if
+            # no engines exist yet — the first RTP packet will create one.
+            self._running = True
+            logger.info(
+                f"PlayerManager: running with {len(self._engines)} engine(s); "
+                f"awaiting auto-detection for additional streams"
+            )
 
     async def stop(self) -> None:
         async with self._lock:
@@ -126,7 +136,52 @@ class PlayerManager:
                     logger.debug(f"PlayerManager: UDP capture stop error: {exc}")
                 self._udp_capture = None
             self._running = False
+            self._loop = None
             logger.info("PlayerManager: stopped")
+
+    # ------------------------------------------------------------------
+    # Dynamic engine spawning
+
+    def _on_player_added_from_registry(self, player: PlayerConfig) -> None:
+        """Registry observer — runs on the UDP / thread pool thread.
+
+        Schedules an async spawn on the manager's event loop so we don't
+        create asyncio objects from arbitrary threads.
+        """
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future, self._spawn_engine_async(player.name)
+            )
+        except Exception as exc:
+            logger.debug(f"PlayerManager: could not schedule spawn for '{player.name}': {exc}")
+
+    async def _spawn_engine_async(self, player_name: str) -> None:
+        async with self._lock:
+            await self._spawn_engine_locked(player_name)
+
+    async def _spawn_engine_locked(self, player_name: str) -> None:
+        if player_name in self._engines:
+            return
+        if self._udp_capture is None:
+            return
+        engine = RecognitionEngine(
+            on_song_change=_wrap_song_change(self._on_song_change, player_name),
+            player_name=player_name,
+            shared_udp_capture=self._udp_capture,
+            **self._engine_kwargs,
+        )
+        try:
+            await engine.start()
+        except Exception as exc:
+            logger.error(
+                f"PlayerManager: failed to start engine for player '{player_name}': {exc}"
+            )
+            return
+        self._engines[player_name] = engine
+        logger.info(f"PlayerManager: engine started for player '{player_name}'")
 
     # ------------------------------------------------------------------
     # Query

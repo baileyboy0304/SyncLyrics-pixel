@@ -27,6 +27,8 @@ let state = {
     players: [],            // last known list from /api/players
     multiInstanceActive: false,
     currentTrackPlayer: null, // player name observed in latest /current-track
+    maPlayers: null,        // cached Music Assistant player list
+    maConfigured: false,    // whether MA integration is configured
 };
 
 // ========== URL & STORAGE ==========
@@ -94,13 +96,18 @@ function effectivePlayerName() {
     return state.selected || state.currentTrackPlayer || null;
 }
 
+function displayNameFor(name) {
+    if (!name) return null;
+    const p = state.players.find(x => x.name === name);
+    return (p && p.display_name) || name;
+}
+
 function updatePlayerDisplay() {
     const toggle = document.getElementById('player-toggle');
     const nameEl = document.getElementById('player-name');
     if (!toggle || !nameEl) return;
 
-    if (!state.multiInstanceActive && state.players.length <= 1) {
-        // Single-player (legacy) mode — keep the button hidden.
+    if (!state.multiInstanceActive) {
         toggle.classList.add('hidden');
         return;
     }
@@ -108,14 +115,14 @@ function updatePlayerDisplay() {
     toggle.classList.remove('hidden');
     toggle.classList.toggle('pinned', !!state.selected);
 
-    const label = effectivePlayerName() || 'Auto';
-    nameEl.textContent = label;
+    const effective = effectivePlayerName();
+    nameEl.textContent = effective ? displayNameFor(effective) : 'Auto';
 
     const tooltipParts = [];
     if (state.selected) {
-        tooltipParts.push(`Pinned to ${state.selected}`);
+        tooltipParts.push(`Pinned to ${displayNameFor(state.selected)}`);
     } else if (state.currentTrackPlayer) {
-        tooltipParts.push(`Auto — currently ${state.currentTrackPlayer}`);
+        tooltipParts.push(`Auto — currently ${displayNameFor(state.currentTrackPlayer)}`);
     } else {
         tooltipParts.push('Auto — server picks a live player');
     }
@@ -193,14 +200,16 @@ function renderPlayerList(payload) {
     if (players.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'player-empty';
-        empty.textContent = 'No players configured. Add players under the addon config to enable multi-instance mode.';
+        empty.textContent = 'No players detected yet. Start playing to a Music Assistant speaker — it will appear here automatically.';
         listEl.appendChild(empty);
     } else {
         players.forEach(player => {
             const engine = engineByName.get(player.name);
             const isSelected = state.selected === player.name;
+            const displayName = player.display_name || player.name;
             const item = document.createElement('div');
             item.className = 'player-item' + (isSelected ? ' current-player' : '');
+            item.dataset.playerName = player.name;
 
             const metaBits = [];
             if (player.description) metaBits.push(player.description);
@@ -222,15 +231,35 @@ function renderPlayerList(payload) {
             item.innerHTML = `
                 <div class="player-item-content">
                     <div class="player-item-header">
-                        <span class="player-item-name">${escapeHtml(player.name)}</span>
+                        <span class="player-item-name">${escapeHtml(displayName)}</span>
                         ${autoBadge}
                         ${currentBadge}
                     </div>
                     <div class="player-item-meta">${escapeHtml(metaBits.join(' · ') || 'No activity yet')}</div>
+                    <div class="player-rename-form hidden" data-rename-for="${escapeAttr(player.name)}">
+                        <label class="player-rename-label">Music Assistant player</label>
+                        <select class="player-rename-ma" data-rename-ma-for="${escapeAttr(player.name)}">
+                            <option value="">Loading…</option>
+                        </select>
+                        <label class="player-rename-label">Display name</label>
+                        <input type="text" class="player-rename-input"
+                               data-rename-input-for="${escapeAttr(player.name)}"
+                               value="${escapeAttr(displayName)}"
+                               placeholder="e.g. Kitchen Speaker" />
+                        <div class="player-rename-actions">
+                            <button class="player-rename-cancel" data-rename-cancel="${escapeAttr(player.name)}">Cancel</button>
+                            <button class="player-rename-save" data-rename-save="${escapeAttr(player.name)}">Save</button>
+                        </div>
+                    </div>
                 </div>
-                <button class="player-select-btn" data-player="${escapeAttr(player.name)}">
-                    ${isSelected ? 'Selected' : 'Use'}
-                </button>
+                <div class="player-item-actions">
+                    <button class="player-rename-btn" data-rename-player="${escapeAttr(player.name)}" title="Rename / link to Music Assistant">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="player-select-btn" data-player="${escapeAttr(player.name)}">
+                        ${isSelected ? 'Selected' : 'Use'}
+                    </button>
+                </div>
             `;
             listEl.appendChild(item);
         });
@@ -290,10 +319,136 @@ export function selectPlayer(name) {
     hidePlayerModal();
 
     if (normalized) {
-        showToast(`Showing lyrics for ${normalized}`);
+        showToast(`Showing lyrics for ${displayNameFor(normalized)}`);
     } else {
         showToast('Following auto-selected player');
     }
+}
+
+// ========== RENAME ==========
+
+async function fetchMaPlayers() {
+    if (state.maPlayers !== null) return state.maPlayers;
+    try {
+        const resp = await fetch('/api/music-assistant/players');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        state.maConfigured = !!data.configured;
+        state.maPlayers = Array.isArray(data.players) ? data.players : [];
+        return state.maPlayers;
+    } catch (err) {
+        console.error('[PlayerSelector] Failed to fetch MA players:', err);
+        state.maPlayers = [];
+        state.maConfigured = false;
+        return state.maPlayers;
+    }
+}
+
+async function populateMaDropdown(selectEl, currentPlayer) {
+    const players = await fetchMaPlayers();
+    selectEl.innerHTML = '';
+
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = state.maConfigured
+        ? '— not linked —'
+        : '— Music Assistant not configured —';
+    selectEl.appendChild(blank);
+
+    const linkedId = currentPlayer && currentPlayer.music_assistant_player_id;
+    players.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.player_id || p.id || '';
+        opt.textContent = p.name || p.display_name || opt.value;
+        if (linkedId && opt.value === linkedId) opt.selected = true;
+        selectEl.appendChild(opt);
+    });
+
+    selectEl.disabled = !state.maConfigured;
+}
+
+async function openRenameForm(playerName) {
+    const listEl = document.getElementById('player-list');
+    if (!listEl) return;
+    // Hide any other rename forms.
+    listEl.querySelectorAll('.player-rename-form').forEach(f => f.classList.add('hidden'));
+
+    const form = listEl.querySelector(`.player-rename-form[data-rename-for="${cssEscape(playerName)}"]`);
+    if (!form) return;
+    form.classList.remove('hidden');
+
+    const select = form.querySelector('.player-rename-ma');
+    const player = state.players.find(p => p.name === playerName);
+    if (select) {
+        select.innerHTML = '<option value="">Loading…</option>';
+        await populateMaDropdown(select, player);
+        // When user picks an MA entry, prefill the display-name input with that name.
+        select.onchange = () => {
+            const opt = select.options[select.selectedIndex];
+            const input = form.querySelector('.player-rename-input');
+            if (opt && opt.value && input && !input.dataset.edited) {
+                input.value = opt.textContent;
+            }
+        };
+    }
+    const input = form.querySelector('.player-rename-input');
+    if (input) {
+        input.addEventListener('input', () => { input.dataset.edited = '1'; }, { once: true });
+        input.focus();
+        input.select();
+    }
+}
+
+function closeRenameForm(playerName) {
+    const listEl = document.getElementById('player-list');
+    if (!listEl) return;
+    const form = listEl.querySelector(`.player-rename-form[data-rename-for="${cssEscape(playerName)}"]`);
+    if (form) form.classList.add('hidden');
+}
+
+async function saveRename(playerName) {
+    const listEl = document.getElementById('player-list');
+    if (!listEl) return;
+    const form = listEl.querySelector(`.player-rename-form[data-rename-for="${cssEscape(playerName)}"]`);
+    if (!form) return;
+
+    const input = form.querySelector('.player-rename-input');
+    const select = form.querySelector('.player-rename-ma');
+    const displayName = input ? input.value.trim() : '';
+    const maId = select ? select.value.trim() : '';
+
+    if (!displayName) {
+        showToast('Display name cannot be empty', 'error');
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/api/players/${encodeURIComponent(playerName)}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                display_name: displayName,
+                music_assistant_player_id: maId || null,
+            }),
+        });
+        if (!resp.ok) {
+            const errText = await resp.text().catch(() => '');
+            throw new Error(errText || `HTTP ${resp.status}`);
+        }
+        showToast(`Renamed to ${displayName}`);
+        await refreshPlayers();
+        // Re-render the modal list so updated names appear immediately.
+        const payload = await fetchPlayersPayload();
+        if (payload) renderPlayerList(payload);
+    } catch (err) {
+        console.error('[PlayerSelector] Rename failed:', err);
+        showToast('Rename failed', 'error');
+    }
+}
+
+function cssEscape(s) {
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+    return String(s).replace(/["\\]/g, '\\$&');
 }
 
 // ========== INITIALIZATION ==========
@@ -352,10 +507,30 @@ export function setupPlayerUI() {
     const listEl = document.getElementById('player-list');
     if (listEl) {
         listEl.addEventListener('click', (e) => {
-            const btn = e.target.closest('.player-select-btn');
-            if (!btn) return;
-            const name = btn.getAttribute('data-player') || '';
-            selectPlayer(name);
+            const selectBtn = e.target.closest('.player-select-btn');
+            if (selectBtn) {
+                const name = selectBtn.getAttribute('data-player') || '';
+                selectPlayer(name);
+                return;
+            }
+            const renameBtn = e.target.closest('.player-rename-btn');
+            if (renameBtn) {
+                const name = renameBtn.getAttribute('data-rename-player') || '';
+                if (name) openRenameForm(name);
+                return;
+            }
+            const cancelBtn = e.target.closest('.player-rename-cancel');
+            if (cancelBtn) {
+                const name = cancelBtn.getAttribute('data-rename-cancel') || '';
+                if (name) closeRenameForm(name);
+                return;
+            }
+            const saveBtn = e.target.closest('.player-rename-save');
+            if (saveBtn) {
+                const name = saveBtn.getAttribute('data-rename-save') || '';
+                if (name) saveRename(name);
+                return;
+            }
         });
     }
 
