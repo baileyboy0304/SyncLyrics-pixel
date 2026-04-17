@@ -3010,6 +3010,32 @@ async def audio_recognition_status():
             if e.get_current_song():
                 live_engine = e
                 break
+
+        # Aggregate per-engine status so the Audio Source UI reflects real
+        # activity across all players (amp meter, search counter, etc.).
+        max_audio_level = 0.0
+        min_no_match = None
+        engine_states = []
+        for e in engines.values():
+            try:
+                st = e.get_status()
+            except Exception:
+                continue
+            lvl = st.get("audio_level") or 0.0
+            if lvl > max_audio_level:
+                max_audio_level = lvl
+            nm = st.get("consecutive_no_match")
+            if nm is not None and (min_no_match is None or nm < min_no_match):
+                min_no_match = nm
+            engine_states.append({
+                "player_name": st.get("player_name"),
+                "state": st.get("state"),
+                "is_playing": st.get("is_playing"),
+                "audio_level": lvl,
+                "consecutive_no_match": nm,
+                "current_song": st.get("current_song"),
+            })
+
         current_song = None
         mode_str = "idle"
         state_str = "idle"
@@ -3041,6 +3067,10 @@ async def audio_recognition_status():
             "manual_mode": False,
             "capture_mode": "udp",
             "current_song": current_song,
+            "audio_level": max_audio_level,
+            "consecutive_no_match": min_no_match if min_no_match is not None else 0,
+            "udp_mode": True,
+            "engines": engine_states,
         })
 
     # Check if reaper module was ever imported (meaning audio rec was actually used)
