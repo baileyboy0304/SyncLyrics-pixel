@@ -18,10 +18,12 @@ hold the registry lock or use the provided public methods which already lock.
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from logging_config import get_logger
 
@@ -29,6 +31,7 @@ logger = get_logger(__name__)
 
 
 DEFAULT_PLAYER_NAME = "default"
+AUTO_PLAYER_PREFIX = "player-"
 
 
 @dataclass
@@ -39,10 +42,14 @@ class PlayerConfig:
     rtp_ssrc: Optional[int] = None
     music_assistant_player_id: Optional[str] = None
     description: Optional[str] = None
-    # True when this player was synthesised at runtime (e.g. the fallback
-    # "default" player used when no players are configured). These are
-    # excluded from config persistence helpers.
+    # True when this player was synthesised at runtime (auto-discovered or the
+    # legacy default fallback). Auto-players are persisted across restarts via
+    # the registry's JSON store, but are still distinguishable from
+    # hand-configured entries in the UI.
     auto: bool = False
+    # Display name shown in the UI. May be derived from Music Assistant or
+    # set manually via /api/players/<name>/rename. Defaults to ``name``.
+    display_name: Optional[str] = None
 
     def matches(self, source_ip: Optional[str], ssrc: Optional[int]) -> bool:
         if self.rtp_ssrc is not None and ssrc is not None and self.rtp_ssrc == ssrc:
@@ -105,19 +112,33 @@ class PlayerRegistry:
         self._learned: Dict[Tuple[str, Optional[int]], Tuple[str, float]] = {}
         self._streams: Dict[Tuple[str, Optional[int]], DiscoveredStream] = {}
         self._auto_discover: bool = True
+        # When True (default once load_from_config is called with an empty
+        # list), unknown streams auto-create a named player. The UX-first
+        # flow relies on this so users never have to edit YAML.
+        self._auto_create_players: bool = True
+        # Observers notified when a new player is added. The PlayerManager
+        # uses this to spawn an engine on demand.
+        self._on_player_added: List[Callable[[PlayerConfig], None]] = []
+        # Next numeric suffix for auto-named players (player-1, player-2, ...).
+        self._auto_counter: int = 0
+        # On-disk path for persisted friendly names + auto-player metadata.
+        # Populated by ``set_persistence_path``; writes no-op until set.
+        self._persistence_path: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Configuration
 
     def load_from_config(self, entries: Iterable[dict], auto_discover: bool = True) -> None:
         """Replace the configured players with the supplied list."""
+        entries_list = list(entries or [])
         with self._lock:
-            # Keep any auto-generated players (e.g. the default fallback) so
-            # that callers who already resolved one keep the same name.
+            # Keep any auto-generated players so that callers who already
+            # resolved one keep the same name (and the UI-renamed friendly
+            # label survives a config reload).
             preserved = {name: p for name, p in self._players.items() if p.auto}
             self._players.clear()
             self._players.update(preserved)
-            for entry in entries or []:
+            for entry in entries_list:
                 name = str(entry.get("name", "")).strip()
                 if not name or name in self._players:
                     continue
@@ -135,14 +156,144 @@ class PlayerRegistry:
                     description=entry.get("description") or None,
                 )
             self._auto_discover = bool(auto_discover)
+            # If the user didn't configure any players explicitly, assume
+            # they want the UX-first flow: unknown streams become new
+            # auto-players automatically. Explicit YAML wiring disables this
+            # so that config remains authoritative when present.
+            self._auto_create_players = not any(not p.auto for p in self._players.values())
             # Drop any learned bindings that point at players we no longer know.
             stale = [key for key, (pn, _) in self._learned.items() if pn not in self._players]
             for key in stale:
                 self._learned.pop(key, None)
             logger.info(
                 f"Player registry loaded: {len(self._players)} configured, "
-                f"auto_discover={self._auto_discover}"
+                f"auto_discover={self._auto_discover}, "
+                f"auto_create={self._auto_create_players}"
             )
+
+    # ------------------------------------------------------------------
+    # Observers
+
+    def add_player_added_listener(self, cb: Callable[[PlayerConfig], None]) -> None:
+        """Register a callback fired whenever a new player enters the registry."""
+        with self._lock:
+            if cb not in self._on_player_added:
+                self._on_player_added.append(cb)
+
+    def _notify_player_added(self, player: PlayerConfig) -> None:
+        # Invoke listeners outside the lock to avoid deadlock — the manager's
+        # callback grabs its own asyncio lock.
+        listeners = list(self._on_player_added)
+        for cb in listeners:
+            try:
+                cb(player)
+            except Exception as exc:
+                logger.debug(f"player-added listener error: {exc}")
+
+    # ------------------------------------------------------------------
+    # Rename + persistence
+
+    def set_persistence_path(self, path: Optional[str]) -> None:
+        """Point the registry at a JSON file for auto-player + rename storage."""
+        with self._lock:
+            self._persistence_path = path or None
+        if path:
+            self._load_persisted()
+
+    def rename(self, player_name: str, new_display_name: str) -> bool:
+        """Set the friendly display name shown in the UI. Persists to disk."""
+        new_label = (new_display_name or "").strip()
+        with self._lock:
+            p = self._players.get(player_name)
+            if p is None:
+                return False
+            p.display_name = new_label or None
+        self._save_persisted()
+        return True
+
+    def _load_persisted(self) -> None:
+        path = self._persistence_path
+        if not path or not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+        except Exception as exc:
+            logger.debug(f"Could not read persisted players ({path}): {exc}")
+            return
+        auto_players = data.get("auto_players") or []
+        counter = int(data.get("auto_counter") or 0)
+        renames = data.get("display_names") or {}
+        with self._lock:
+            for entry in auto_players:
+                name = (entry.get("name") or "").strip()
+                if not name or name in self._players:
+                    continue
+                self._players[name] = PlayerConfig(
+                    name=name,
+                    source_ip=entry.get("source_ip") or None,
+                    rtp_ssrc=entry.get("rtp_ssrc"),
+                    music_assistant_player_id=entry.get("music_assistant_player_id") or None,
+                    description=entry.get("description") or None,
+                    auto=True,
+                    display_name=entry.get("display_name") or None,
+                )
+            if counter > self._auto_counter:
+                self._auto_counter = counter
+            for name, label in renames.items():
+                p = self._players.get(name)
+                if p is not None and label:
+                    p.display_name = str(label)
+        logger.info(
+            f"Player registry restored from {path}: "
+            f"{len(auto_players)} auto-players, {len(renames)} renames"
+        )
+
+    def _save_persisted(self) -> None:
+        path = self._persistence_path
+        if not path:
+            return
+        with self._lock:
+            auto_players = [
+                {
+                    "name": p.name,
+                    "source_ip": p.source_ip,
+                    "rtp_ssrc": p.rtp_ssrc,
+                    "music_assistant_player_id": p.music_assistant_player_id,
+                    "description": p.description,
+                    "display_name": p.display_name,
+                }
+                for p in self._players.values()
+                if p.auto
+            ]
+            renames = {
+                p.name: p.display_name
+                for p in self._players.values()
+                if p.display_name
+            }
+            data = {
+                "auto_counter": self._auto_counter,
+                "auto_players": auto_players,
+                "display_names": renames,
+            }
+        try:
+            tmp = f"{path}.tmp"
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            os.replace(tmp, path)
+        except Exception as exc:
+            logger.debug(f"Could not persist players to {path}: {exc}")
+
+    def set_music_assistant_player(self, player_name: str, ma_player_id: Optional[str]) -> bool:
+        """Bind an MA player_id to one of our logical players (for MA-derived names)."""
+        with self._lock:
+            p = self._players.get(player_name)
+            if p is None:
+                return False
+            p.music_assistant_player_id = (ma_player_id or None)
+        self._save_persisted()
+        return True
 
     def ensure_default_player(self) -> PlayerConfig:
         """
@@ -199,6 +350,7 @@ class PlayerRegistry:
         """
         now = time.time()
         key = (source_ip, ssrc)
+        new_player: Optional[PlayerConfig] = None
 
         with self._lock:
             self._record_stream(key, source_ip, source_port, ssrc, payload_type, now)
@@ -240,14 +392,45 @@ class PlayerRegistry:
                 self._bind_locked(key, target.name, now)
                 return target.name
 
+            # UX-first auto-create: if no configured players match, spin up a
+            # new auto-player for this source so the user never has to edit
+            # YAML. Display name falls back to the source IP until an MA
+            # resolver or a manual rename fills it in.
+            if self._auto_create_players:
+                self._auto_counter += 1
+                name = f"{AUTO_PLAYER_PREFIX}{self._auto_counter}"
+                while name in self._players:
+                    self._auto_counter += 1
+                    name = f"{AUTO_PLAYER_PREFIX}{self._auto_counter}"
+                new_player = PlayerConfig(
+                    name=name,
+                    source_ip=source_ip,
+                    rtp_ssrc=ssrc,
+                    auto=True,
+                    display_name=source_ip,
+                )
+                self._players[name] = new_player
+                self._bind_locked(key, name, now)
+                logger.info(
+                    f"Auto-created player '{name}' for {source_ip}:{source_port} "
+                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'})"
+                )
+
             # Fallback: if there's exactly one player total (including auto), use it.
-            if len(self._players) == 1:
+            elif len(self._players) == 1:
                 only = next(iter(self._players.values()))
                 self._bind_locked(key, only.name, now)
                 return only.name
+            else:
+                # Otherwise unassigned — leave in _streams for UI and return None.
+                return None
 
-            # Otherwise unassigned — leave in _streams for UI and return None.
-            return None
+        # Notify + persist outside the lock (listeners may take their own locks).
+        if new_player is not None:
+            self._save_persisted()
+            self._notify_player_added(new_player)
+            return new_player.name
+        return None
 
     def bind(self, source_ip: str, ssrc: Optional[int], player_name: str) -> bool:
         """Manually bind a discovered stream to a configured player."""

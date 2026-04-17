@@ -512,6 +512,7 @@ async def api_players() -> dict:
     configured = [
         {
             "name": p.name,
+            "display_name": p.display_name or p.name,
             "source_ip": p.source_ip,
             "rtp_ssrc": f"0x{p.rtp_ssrc:08X}" if p.rtp_ssrc is not None else None,
             "music_assistant_player_id": p.music_assistant_player_id,
@@ -540,6 +541,50 @@ async def api_player_track(player_name: str):
     if payload is None:
         return jsonify({"error": f"no track for player '{player_name}'"}), 404
     return jsonify(payload)
+
+
+@app.route("/api/players/<player_name>/rename", methods=["POST"])
+async def api_player_rename(player_name: str):
+    """
+    Set a friendly display name for an auto-detected (or configured) player.
+    Body: {"display_name": "Study"}  or  {"display_name": "", "music_assistant_player_id": "ma_id"}
+    """
+    try:
+        body = await request.get_json(force=True, silent=True) or {}
+    except Exception:
+        body = {}
+    display_name = (body.get("display_name") or "").strip()
+    ma_player_id = body.get("music_assistant_player_id")
+    from audio_recognition.player_registry import get_registry
+    registry = get_registry()
+    ok = registry.rename(player_name, display_name)
+    if not ok:
+        return jsonify({"error": f"unknown player '{player_name}'"}), 404
+    if ma_player_id is not None:
+        registry.set_music_assistant_player(player_name, ma_player_id or None)
+    return jsonify({"ok": True, "display_name": display_name or player_name})
+
+
+@app.route("/api/music-assistant/players", methods=["GET"])
+async def api_ma_players():
+    """
+    Return the list of Music Assistant players so the UI can offer them as
+    naming suggestions for auto-detected RTP sources. Safe no-op when MA
+    isn't configured / reachable — returns an empty list.
+    """
+    try:
+        from system_utils.sources.music_assistant import MusicAssistantSource, is_configured
+    except Exception:
+        return jsonify({"players": [], "configured": False})
+    if not is_configured():
+        return jsonify({"players": [], "configured": False})
+    try:
+        ma = MusicAssistantSource()
+        devices = await ma.get_devices()
+    except Exception as exc:
+        logger.debug(f"MA players fetch failed: {exc}")
+        devices = []
+    return jsonify({"players": devices, "configured": True})
 
 
 @app.route("/api/players/bind", methods=["POST"])
