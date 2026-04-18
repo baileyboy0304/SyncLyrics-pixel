@@ -260,6 +260,13 @@ class _PlayerStream:
 
         self._jitter_buffer: Optional[JitterBuffer] = None
         self._rtp_detected: Optional[bool] = None
+        # SSRC currently bound to the jitter buffer. RTP sequence numbers are
+        # only meaningful within a single SSRC — a new SSRC means a fresh
+        # session and the buffer must reset, otherwise the sequence delta
+        # is interpreted as massive packet loss and the ring fills with
+        # silence (Shazam never matches).
+        self._current_ssrc: Optional[int] = None
+        self._ssrc_changes: int = 0
 
         self._packets_received = 0
         self._packets_lost = 0
@@ -287,6 +294,7 @@ class _PlayerStream:
         if self._jitter_buffer:
             self._jitter_buffer.reset()
             self._jitter_buffer = None
+        self._current_ssrc = None
         self._packets_received = 0
         self._packets_lost = 0
         self._data_event.set()
@@ -295,8 +303,38 @@ class _PlayerStream:
 
     def handle_packet(self, data: bytes, is_rtp: bool) -> None:
         if is_rtp:
+            # Peek SSRC cheaply to detect session changes before touching the
+            # jitter buffer. A new SSRC means a brand-new RTP session whose
+            # sequence/timestamp space is unrelated to the previous one — we
+            # must drop the partial buffer and re-anchor.
+            ssrc: Optional[int] = None
+            try:
+                ssrc = struct.unpack_from('!I', data, 8)[0]
+            except (struct.error, IndexError):
+                pass
+
+            if (self._jitter_buffer is not None
+                    and ssrc is not None
+                    and self._current_ssrc is not None
+                    and ssrc != self._current_ssrc):
+                self._ssrc_changes += 1
+                logger.info(
+                    f"Player '{self.name}': SSRC change "
+                    f"0x{self._current_ssrc:08X} -> 0x{ssrc:08X} "
+                    f"(session restart) — resetting jitter buffer "
+                    f"and dropping {len(self._buffer)} buffered bytes"
+                )
+                self._jitter_buffer.reset()
+                self._jitter_buffer = None
+                # Drop any pre-switch bytes; they belong to the old session
+                # and would be played out-of-order against the new clock.
+                self._buffer.clear()
+                self._last_read_total = self._total_bytes_received
+                self._current_ssrc = None
+
             if self._jitter_buffer is None:
                 self._init_jitter_buffer(data)
+                self._current_ssrc = ssrc
             self._handle_rtp(data)
         else:
             self._append(data)
