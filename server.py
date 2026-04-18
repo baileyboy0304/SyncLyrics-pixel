@@ -475,6 +475,7 @@ def _build_player_track_payload(player_name: str) -> Optional[dict]:
         return None
     position = mgr.get_current_position(player_name) or 0.0
     duration_ms = song.get("duration_ms") or 0
+    duration_sec = duration_ms / 1000.0 if duration_ms else 0
     artist = song.get("artist", "")
     title = song.get("title", "")
     metadata = {
@@ -489,8 +490,12 @@ def _build_player_track_payload(player_name: str) -> Optional[dict]:
         "artist_name": song.get("artist_name") or artist,
         "track_id": song.get("track_id"),
         "id": song.get("id"),
+        # Frontend reads `position` (seconds) and `duration_ms` (ms);
+        # keep `progress`/`duration` for any legacy callers.
+        "position": position,
         "progress": int(position * 1000),
-        "duration": int(duration_ms),
+        "duration": duration_sec,
+        "duration_ms": int(duration_ms),
         "is_playing": True,
         "isrc": song.get("isrc"),
         "spotify_url": song.get("spotify_url"),
