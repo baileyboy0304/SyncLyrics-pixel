@@ -364,7 +364,14 @@ class PlayerRegistry:
                     return pname
                 self._learned.pop(key, None)
 
-            # Explicit filter match (SSRC wins over IP)
+            # Explicit filter match (SSRC wins over IP).
+            #
+            # IP-only matching must skip players that are pinned to a
+            # *different* SSRC: a single host (e.g. Music Assistant) may
+            # emit several independent RTP sessions from the same source
+            # IP, one per speaker group. Treating them as the same player
+            # would make the per-player jitter buffer flip between SSRCs
+            # and trash both streams.
             by_ssrc = None
             by_ip = None
             unfiltered: List[PlayerConfig] = []
@@ -373,6 +380,14 @@ class PlayerRegistry:
                     by_ssrc = p
                     break
                 if p.source_ip and p.source_ip == source_ip:
+                    if (
+                        p.rtp_ssrc is not None
+                        and ssrc is not None
+                        and p.rtp_ssrc != ssrc
+                    ):
+                        # Same IP but a different RTP session — let it
+                        # fall through to auto-create / unassigned.
+                        continue
                     by_ip = by_ip or p
                 elif not p.has_explicit_filter and not p.auto:
                     unfiltered.append(p)
