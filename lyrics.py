@@ -1461,52 +1461,65 @@ async def refetch_lyrics(artist: str, title: str, album: str = None, duration: i
 # Main Logic
 # ==========================================
 
-async def _fetch_and_set_lyrics(target_artist: str, target_title: str, 
+async def _fetch_and_set_lyrics(target_artist: str, target_title: str,
                                  album: str = None, duration: int = None):
     """
     Background task helper to fetch lyrics without blocking the UI.
-    
+
     This function runs in the background after _update_song has already
     updated current_song_data and released the lock. This prevents the
     UI from freezing while waiting for internet requests to complete.
-    
+
     Args:
         target_artist: Artist name
         target_title: Song title
         album: Album name for better provider matching (optional)
         duration: Track duration in seconds (optional)
-    
+
     After fetching, reloads from DB to populate word-sync globals.
+
+    In multi-instance mode this task starts AFTER the request handler's
+    scoped_player_state has exited, so the module globals no longer reflect
+    the player that triggered the fetch. asyncio.create_task copies the
+    current context, so the metadata_player_hint ContextVar is still set
+    to the originating player here; we re-enter scoped_player_state for
+    the brief commit phase so the lyrics land in the right player's
+    snapshot instead of the default-globals slot.
     """
     global current_song_lyrics, current_song_data, current_song_provider
     global current_song_word_synced_lyrics, current_word_sync_provider
 
+    player_name = _system_state.metadata_player_hint.get()
+
     try:
         # Use the global _get_lyrics function to fetch from internet providers
         # Pass album/duration for better provider matching (scoring)
+        # The HTTP fetch happens outside scoped_player_state so it doesn't
+        # serialise other players' requests on _state_swap_lock.
         fetched_lyrics = await _get_lyrics(target_artist, target_title, album, duration)
-        
-        # CRITICAL: Check if song is still the same before setting lyrics
-        # This prevents stale lyrics from a previous song being displayed
-        # if the user skipped to a new song while this fetch was in progress
-        if (current_song_data and 
-            current_song_data["artist"] == target_artist and 
-            current_song_data["title"] == target_title):
-            current_song_lyrics = fetched_lyrics
-            
-            # BUGFIX: Reload from DB to populate word-sync globals AND get correctly selected lyrics
-            # _get_lyrics() saves word-sync to DB but doesn't return it.
-            # Loading from DB also applies word-sync boost to select the best provider.
-            # CRITICAL: We must use the return value to update current_song_lyrics,
-            # otherwise there's a mismatch between current_song_provider and current_song_lyrics.
-            reloaded_lyrics = _load_from_db(target_artist, target_title)
-            if reloaded_lyrics:
-                current_song_lyrics = reloaded_lyrics
-            
-            logger.info(f"Background fetch completed for {target_artist} - {target_title}")
-        else:
-            # Song changed during fetch - discard these lyrics to prevent wrong display
-            logger.debug(f"Discarded background lyrics for {target_artist} - {target_title} (song changed)")
+
+        async with scoped_player_state(player_name):
+            # CRITICAL: Check if song is still the same before setting lyrics
+            # This prevents stale lyrics from a previous song being displayed
+            # if the user skipped to a new song while this fetch was in progress
+            if (current_song_data and
+                current_song_data["artist"] == target_artist and
+                current_song_data["title"] == target_title):
+                current_song_lyrics = fetched_lyrics
+
+                # BUGFIX: Reload from DB to populate word-sync globals AND get correctly selected lyrics
+                # _get_lyrics() saves word-sync to DB but doesn't return it.
+                # Loading from DB also applies word-sync boost to select the best provider.
+                # CRITICAL: We must use the return value to update current_song_lyrics,
+                # otherwise there's a mismatch between current_song_provider and current_song_lyrics.
+                reloaded_lyrics = _load_from_db(target_artist, target_title)
+                if reloaded_lyrics:
+                    current_song_lyrics = reloaded_lyrics
+
+                logger.info(f"Background fetch completed for {target_artist} - {target_title}")
+            else:
+                # Song changed during fetch - discard these lyrics to prevent wrong display
+                logger.debug(f"Discarded background lyrics for {target_artist} - {target_title} (song changed)")
     except Exception as e:
         logger.error(f"Error in background fetch for {target_artist}: {e}")
 
