@@ -9,6 +9,7 @@ from quart import Quart, render_template, redirect, flash, request, jsonify, url
 from lyrics import get_timed_lyrics_previous_and_next, get_current_provider, _is_manually_instrumental, _is_cached_instrumental, set_manual_instrumental
 import lyrics as lyrics_module
 from system_utils import get_current_song_meta_data, get_album_db_folder, load_album_art_from_db, save_album_db_metadata, get_cached_art_path, cleanup_old_art, clear_artist_image_cache
+from system_utils import state as system_state
 from state_manager import *
 from config import LYRICS, RESOURCES_DIR, ALBUM_ART_DB_DIR, SERVER, conf
 from settings import settings
@@ -226,19 +227,18 @@ async def lyrics() -> dict:
     Called by the frontend JavaScript to fetch lyrics updates.
 
     If ``?player=<name>`` is supplied and multi-instance mode is active, the
-    response is guarded so it only surfaces lyrics when the global lyrics
-    module's current song matches the requested player's track. This prevents
-    a display pinned to player B from showing player A's lyrics while the
-    backend's global lyrics state catches up. Full per-player lyrics caching
-    is deferred to a follow-up refactor.
+    handler runs under ``lyrics_module.scoped_player_state(player_name)`` which
+    swaps the module-level lyrics globals with that player's snapshot and sets
+    the metadata player hint. This way the fetch pipeline keys off the correct
+    song per player instead of whichever engine was registered first.
     """
     player_scope = _player_name_from_request()
     if player_scope:
         mgr = _get_player_manager_if_running()
         if mgr is not None:
             scoped_song = mgr.get_current_song(player_scope)
-            scoped_colors = (scoped_song or {}).get("colors") or ["#24273a", "#363b54"]
             if not scoped_song:
+                scoped_colors = ["#24273a", "#363b54"]
                 return {
                     "lyrics": [],
                     "msg": f"Waiting for player '{player_scope}'...",
@@ -252,23 +252,12 @@ async def lyrics() -> dict:
                     "word_sync_provider": None,
                     "player": player_scope,
                 }
-            current = lyrics_module.current_song_data or {}
-            if (current.get("artist") != scoped_song.get("artist")
-                    or current.get("title") != scoped_song.get("title")):
-                return {
-                    "lyrics": [],
-                    "msg": "Loading lyrics...",
-                    "colors": scoped_colors,
-                    "provider": None,
-                    "has_lyrics": False,
-                    "is_instrumental": False,
-                    "is_instrumental_manual": False,
-                    "word_synced_lyrics": None,
-                    "has_word_sync": False,
-                    "word_sync_provider": None,
-                    "player": player_scope,
-                }
 
+    async with lyrics_module.scoped_player_state(player_scope):
+        return await _build_lyrics_response(player_scope)
+
+
+async def _build_lyrics_response(player_scope: Optional[str]) -> dict:
     lyrics_data = await get_timed_lyrics_previous_and_next()
     metadata = await get_current_song_meta_data()
     
@@ -2434,18 +2423,29 @@ async def seek_playback():
 async def get_artist_images():
     """
     Get artist images, preferring local DB, falling back to Spotify and caching.
-    
+
     Query params:
         artist_id: Spotify artist ID (optional, used for fallback)
         include_metadata: If 'true', return full image metadata and preferences
+        player: Optional multi-instance player name. When supplied the artist
+            is resolved against that player's engine rather than the first
+            registered one, so the slideshow matches the scoped frontend.
     """
     # Get query params
     artist_id = request.args.get('artist_id')
     include_metadata = request.args.get('include_metadata', 'false').lower() == 'true'
-    
+    player_scope = _player_name_from_request()
+
     # We also need the artist NAME to find the folder
     # Try to get from current metadata if not passed
-    metadata = await get_current_song_meta_data()
+    hint_token = None
+    if player_scope:
+        hint_token = system_state.metadata_player_hint.set(player_scope)
+    try:
+        metadata = await get_current_song_meta_data()
+    finally:
+        if hint_token is not None:
+            system_state.metadata_player_hint.reset(hint_token)
     artist_name = metadata.get('artist') if metadata else None
     
     if not artist_name:

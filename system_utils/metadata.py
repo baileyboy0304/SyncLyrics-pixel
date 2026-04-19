@@ -298,11 +298,18 @@ async def get_current_song_meta_data() -> Optional[dict]:
                 mgr = get_player_manager()
                 if mgr.is_running:
                     engines = mgr.list_engines()
+                    # Prefer the player explicitly hinted by the request scope
+                    # (e.g. /lyrics?player=X) so scoped frontends see their own
+                    # song instead of whichever engine was inserted first.
+                    hint = state.metadata_player_hint.get()
                     live_engine = None
-                    for engine in engines.values():
-                        if engine.get_current_song():
-                            live_engine = engine
-                            break
+                    if hint and hint in engines and engines[hint].get_current_song():
+                        live_engine = engines[hint]
+                    if live_engine is None:
+                        for engine in engines.values():
+                            if engine.get_current_song():
+                                live_engine = engine
+                                break
                     if live_engine is not None:
                         song = live_engine.get_current_song() or {}
                         position = live_engine.get_current_position() or 0.0
