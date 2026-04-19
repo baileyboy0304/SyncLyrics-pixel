@@ -463,8 +463,12 @@ export async function fetchArtistImages(artistId, includeMetadata = false) {
             params.set('include_metadata', 'true');
         }
         const queryString = params.toString();
-        const url = `/api/artist/images${queryString ? '?' + queryString : ''}`;
-        
+        const baseUrl = `/api/artist/images${queryString ? '?' + queryString : ''}`;
+        // Scope to the active multi-instance player so the slideshow matches
+        // the artist this page is currently displaying instead of whichever
+        // engine the backend registered first.
+        const url = withPlayerScope(baseUrl);
+
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

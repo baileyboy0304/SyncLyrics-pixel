@@ -8,6 +8,7 @@ It imports NOTHING from the system_utils package to prevent circular imports.
 from __future__ import annotations
 import asyncio
 import threading
+from contextvars import ContextVar
 from typing import Optional, Dict, Any
 from collections import OrderedDict
 
@@ -43,6 +44,20 @@ _NO_ART_FOUND_TTL = 240  # 4 minutes before retrying album art lookup for tracks
 
 # Throttle intervals
 _ARTIST_IMAGE_LOG_THROTTLE_SECONDS = 60  # Log at most once per minute per artist
+
+# ==========================================
+# REQUEST-SCOPED CONTEXT
+# ==========================================
+
+# Optional player-name hint propagated down the metadata / lyrics chain when a
+# request is scoped to a specific multi-instance player (e.g. /lyrics?player=X,
+# /api/artist/images?player=X). Consumers that know about multi-player mode
+# read this ContextVar and resolve against the named engine instead of
+# falling back to the first-registered one. Unset -> legacy single-tenant
+# behaviour.
+metadata_player_hint: ContextVar[Optional[str]] = ContextVar(
+    "metadata_player_hint", default=None
+)
 
 # ==========================================
 # ASYNCIO LOCKS (Singleton - must not be duplicated)

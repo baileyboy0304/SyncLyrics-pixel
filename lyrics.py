@@ -3,9 +3,11 @@ import logging
 import json
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from typing import Optional, List, Tuple, Dict, Set, Any
 
 from system_utils import get_current_song_meta_data, create_tracked_task
+from system_utils import state as _system_state
 from providers.lrclib import LRCLIBProvider
 from providers.netease import NetEaseProvider
 from providers.spotify_lyrics import SpotifyLyrics
@@ -39,6 +41,66 @@ current_word_sync_provider: Optional[str] = None  # NEW: Tracks which provider i
 _db_lock = asyncio.Lock()  # Protects read/modify/write cycle for DB files
 _update_lock = asyncio.Lock()  # Protects against race conditions in `_update_song` - ensures only one song update happens at a time
 _backfill_tracker: Set[str] = set()  # Avoid duplicate backfill runs per song
+
+# Per-player snapshots of the module-level lyrics state (song_data, lyrics,
+# provider, word-sync state). In single-tenant (legacy) mode this stays empty
+# and callers see only the globals above. In multi-instance mode each scoped
+# request (e.g. /lyrics?player=X) swaps its player's snapshot into the globals
+# for the duration of the handler via ``scoped_player_state`` so the fetch
+# pipeline keys off the correct song and different players don't trash each
+# other's cached lyrics.
+_player_lyrics_state: Dict[str, Dict[str, Any]] = {}
+
+# Serialises the global<->snapshot swap. Intentionally independent of the
+# _update_lock so fetch concurrency rules stay as-is for single-tenant callers.
+_state_swap_lock = asyncio.Lock()
+
+
+def _snapshot_globals() -> Dict[str, Any]:
+    return {
+        "song_data": current_song_data,
+        "lyrics": current_song_lyrics,
+        "provider": current_song_provider,
+        "word_synced_lyrics": current_song_word_synced_lyrics,
+        "word_sync_provider": current_word_sync_provider,
+    }
+
+
+def _restore_globals(snap: Dict[str, Any]) -> None:
+    global current_song_data, current_song_lyrics, current_song_provider
+    global current_song_word_synced_lyrics, current_word_sync_provider
+    current_song_data = snap.get("song_data")
+    current_song_lyrics = snap.get("lyrics")
+    current_song_provider = snap.get("provider")
+    current_song_word_synced_lyrics = snap.get("word_synced_lyrics")
+    current_word_sync_provider = snap.get("word_sync_provider")
+
+
+@asynccontextmanager
+async def scoped_player_state(player_name: Optional[str]):
+    """
+    Swap per-player lyrics state into module globals for the duration of the
+    block, and also set the metadata ``metadata_player_hint`` ContextVar so
+    downstream ``get_current_song_meta_data()`` calls resolve against the
+    named engine.
+
+    Callers (multi-instance request handlers) wrap an entire request in this
+    context so reads of ``lyrics_module.current_song_data`` etc. see the
+    correct player's state. No-op when ``player_name`` is None.
+    """
+    if not player_name:
+        yield
+        return
+    async with _state_swap_lock:
+        saved_default = _snapshot_globals()
+        _restore_globals(_player_lyrics_state.get(player_name, {}))
+        token = _system_state.metadata_player_hint.set(player_name)
+        try:
+            yield
+        finally:
+            _system_state.metadata_player_hint.reset(token)
+            _player_lyrics_state[player_name] = _snapshot_globals()
+            _restore_globals(saved_default)
 
 # ==========================================
 # NEW: Local Database Helper Functions
