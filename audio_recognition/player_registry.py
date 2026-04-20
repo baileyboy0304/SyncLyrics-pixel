@@ -295,6 +295,58 @@ class PlayerRegistry:
         self._save_persisted()
         return True
 
+    def set_display_name_from_stream(
+        self,
+        source_ip: str,
+        ssrc: Optional[int],
+        display_name: Optional[str],
+        player_id: Optional[str],
+    ) -> bool:
+        """
+        Update display metadata for the player that currently owns a stream.
+
+        Used when RTP extension metadata carries a Music Assistant display name.
+        """
+        clean_name = (display_name or "").strip()
+        clean_player_id = (player_id or "").strip() or None
+        if not clean_name:
+            return False
+
+        updated = False
+        with self._lock:
+            key = (source_ip, ssrc)
+            resolved: Optional[str] = None
+
+            learned = self._learned.get(key)
+            if learned is not None:
+                learned_name, _ = learned
+                if learned_name in self._players:
+                    resolved = learned_name
+
+            if resolved is None:
+                for p in self._players.values():
+                    if p.matches(source_ip, ssrc):
+                        resolved = p.name
+                        break
+
+            if resolved is None:
+                return False
+
+            player = self._players.get(resolved)
+            if player is None:
+                return False
+
+            if player.display_name != clean_name:
+                player.display_name = clean_name
+                updated = True
+            if player.music_assistant_player_id != clean_player_id:
+                player.music_assistant_player_id = clean_player_id
+                updated = True
+
+        if updated:
+            self._save_persisted()
+        return updated
+
     def ensure_default_player(self) -> PlayerConfig:
         """
         Guarantee at least one player exists. In single-player (legacy) mode
