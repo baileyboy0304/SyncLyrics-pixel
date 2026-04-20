@@ -636,14 +636,25 @@ class UdpAudioCapture:
         is_rtp = _looks_like_rtp(data)
         ssrc: Optional[int] = None
         payload_type: Optional[int] = None
+        ma_name: Optional[str] = None
+        ma_id: Optional[str] = None
         if is_rtp:
             try:
                 ssrc = struct.unpack_from('!I', data, 8)[0]
                 payload_type = data[1] & 0x7F
             except (struct.error, IndexError):
                 ssrc = None
+            # If the sender set the X bit, pull the MA name/id out now so
+            # resolve() can treat them as the primary identity — preventing
+            # duplicate player-N entries when SSRC changes.
+            if len(data) > 0 and ((data[0] >> 4) & 0x01):
+                ma_name, ma_id = _peek_ma_identity(data)
 
-        player_name = self._registry.resolve(source_ip, source_port, ssrc, payload_type)
+        player_name = self._registry.resolve(
+            source_ip, source_port, ssrc, payload_type,
+            ma_player_name=ma_name,
+            ma_player_id=ma_id,
+        )
         if player_name is None:
             self._dropped_unassigned += 1
             now = time.time()
@@ -674,46 +685,22 @@ class UdpAudioCapture:
 
         stream.handle_packet(data, is_rtp)
 
-        # If the sender included an RFC 8285 header extension with the MA
-        # speaker name / player id, feed it to the registry so the UI shows
-        # the real name instead of the IP fallback. Legacy senders (no
-        # extension bit) bypass this block entirely.
-        if is_rtp and len(data) > 0 and ((data[0] >> 4) & 0x01):
-            self._maybe_apply_stream_identity(data, source_ip, ssrc)
-
-    def _maybe_apply_stream_identity(
-        self,
-        data: bytes,
-        source_ip: str,
-        ssrc: Optional[int],
-    ) -> None:
-        try:
-            pkt = RtpPacket(data)
-        except ValueError:
-            return
-        if not pkt.ext_elements:
-            return
-        name_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_NAME)
-        id_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_ID)
-        if not name_bytes and not id_bytes:
-            return
-        try:
-            display_name = name_bytes.decode('utf-8').strip() if name_bytes else None
-            ma_player_id = id_bytes.decode('utf-8').strip() if id_bytes else None
-        except UnicodeDecodeError:
-            logger.debug(f"Dropping non-UTF-8 RTP identity from {source_ip}")
-            return
-        if self._registry.apply_stream_identity(
-            source_ip=source_ip,
-            ssrc=ssrc,
-            display_name=display_name,
-            ma_player_id=ma_player_id,
-        ):
-            logger.info(
-                f"Applied stream identity from {source_ip} "
-                f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}): "
-                f"name={display_name!r}, id={ma_player_id!r}"
-            )
+        # resolve() already bound/created the player using the MA identity
+        # hints above. A subsequent apply_stream_identity call keeps
+        # ma_display_name / music_assistant_player_id in sync when the
+        # sender rotates them mid-session and respects manual renames.
+        if ma_name or ma_id:
+            if self._registry.apply_stream_identity(
+                source_ip=source_ip,
+                ssrc=ssrc,
+                display_name=ma_name,
+                ma_player_id=ma_id,
+            ):
+                logger.info(
+                    f"Applied stream identity from {source_ip} "
+                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}): "
+                    f"name={ma_name!r}, id={ma_id!r}"
+                )
 
     # ------------------------------------------------------------------
     # Consumer API
@@ -757,6 +744,29 @@ class UdpAudioCapture:
             default = self._registry.ensure_default_player()
             return default.name
         return players[0].name
+
+
+def _peek_ma_identity(data: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Return ``(ma_player_name, ma_player_id)`` from an RTP packet's RFC 8285
+    header extension, or ``(None, None)`` if the extension is absent, an
+    unknown profile, or malformed. Never raises — callers use the result to
+    prefer MA identity over SSRC when binding a packet to a player.
+    """
+    try:
+        pkt = RtpPacket(data)
+    except ValueError:
+        return (None, None)
+    if not pkt.ext_elements:
+        return (None, None)
+    name_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_NAME)
+    id_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_ID)
+    try:
+        name = name_bytes.decode('utf-8').strip() if name_bytes else None
+        pid = id_bytes.decode('utf-8').strip() if id_bytes else None
+    except UnicodeDecodeError:
+        return (None, None)
+    return (name or None, pid or None)
 
 
 def _looks_like_rtp(data: bytes) -> bool:

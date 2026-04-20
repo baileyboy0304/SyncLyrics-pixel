@@ -54,6 +54,10 @@ class PlayerConfig:
     # supplied names (RTP header extension) must not overwrite a manual
     # rename — only the user can undo that.
     display_name_is_manual: bool = False
+    # Latest MA speaker name reported by the UDP sender. Kept separate from
+    # ``display_name`` so manual UI renames do not break identity matching
+    # when a new RTP session (new SSRC) arrives from the same speaker.
+    ma_display_name: Optional[str] = None
 
     def matches(self, source_ip: Optional[str], ssrc: Optional[int]) -> bool:
         if self.rtp_ssrc is not None and ssrc is not None and self.rtp_ssrc == ssrc:
@@ -250,6 +254,9 @@ class PlayerRegistry:
             if p is None:
                 return False
 
+            if display and p.ma_display_name != display:
+                p.ma_display_name = display
+                changed = True
             if display and not p.display_name_is_manual and p.display_name != display:
                 p.display_name = display
                 changed = True
@@ -289,6 +296,7 @@ class PlayerRegistry:
                     auto=True,
                     display_name=entry.get("display_name") or None,
                     display_name_is_manual=bool(entry.get("display_name_is_manual")),
+                    ma_display_name=entry.get("ma_display_name") or None,
                 )
             if counter > self._auto_counter:
                 self._auto_counter = counter
@@ -317,6 +325,7 @@ class PlayerRegistry:
                     "description": p.description,
                     "display_name": p.display_name,
                     "display_name_is_manual": p.display_name_is_manual,
+                    "ma_display_name": p.ma_display_name,
                 }
                 for p in self._players.values()
                 if p.auto
@@ -397,6 +406,8 @@ class PlayerRegistry:
         source_port: int,
         ssrc: Optional[int],
         payload_type: Optional[int],
+        ma_player_name: Optional[str] = None,
+        ma_player_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Decide which player a packet belongs to. Returns the player name
@@ -404,14 +415,19 @@ class PlayerRegistry:
 
         Lookup order:
           1. Previously learned binding for (source_ip, ssrc).
-          2. Explicit config filter (rtp_ssrc > source_ip).
-          3. If auto-discover is enabled and exactly one player has no
+          2. MA identity hint from the stream (``ma_player_id`` or
+             ``ma_player_name``) — a new RTP session (new SSRC) from the
+             same speaker re-uses the existing player instead of creating a
+             duplicate.
+          3. Explicit config filter (rtp_ssrc > source_ip).
+          4. If auto-discover is enabled and exactly one player has no
              explicit filter, bind that player to this stream.
-          4. Drop (unassigned) but record as a discovered stream.
+          5. Drop (unassigned) but record as a discovered stream.
         """
         now = time.time()
         key = (source_ip, ssrc)
         new_player: Optional[PlayerConfig] = None
+        consolidated: List[str] = []
 
         with self._lock:
             self._record_stream(key, source_ip, source_port, ssrc, payload_type, now)
@@ -425,6 +441,36 @@ class PlayerRegistry:
                     return pname
                 self._learned.pop(key, None)
 
+            # MA identity match — strongest signal once the sender starts
+            # embedding the name/id in the RTP extension. Lets a new SSRC
+            # from the same speaker reuse its existing player entry instead
+            # of spawning player-N duplicates.
+            ma_match = self._find_by_ma_identity_locked(ma_player_id, ma_player_name)
+            if ma_match is not None:
+                ma_match.source_ip = source_ip
+                ma_match.rtp_ssrc = ssrc
+                if ma_player_name:
+                    ma_match.ma_display_name = ma_player_name
+                    if not ma_match.display_name_is_manual:
+                        ma_match.display_name = ma_player_name
+                if ma_player_id:
+                    ma_match.music_assistant_player_id = ma_player_id
+                consolidated = self._consolidate_ma_duplicates_locked(
+                    ma_match, ma_player_id, ma_player_name
+                )
+                self._bind_locked(key, ma_match.name, now)
+                logger.info(
+                    f"MA identity match: binding {source_ip}:{source_port} "
+                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}) "
+                    f"to existing player '{ma_match.name}' "
+                    f"(id={ma_player_id!r}, name={ma_player_name!r})"
+                )
+                if consolidated:
+                    logger.info(
+                        f"Consolidated duplicate players into '{ma_match.name}': "
+                        f"{consolidated}"
+                    )
+
             # Explicit filter match (SSRC wins over IP).
             #
             # IP-only matching must skip players that are pinned to a
@@ -433,63 +479,73 @@ class PlayerRegistry:
             # IP, one per speaker group. Treating them as the same player
             # would make the per-player jitter buffer flip between SSRCs
             # and trash both streams.
-            by_ssrc = None
-            by_ip = None
-            unfiltered: List[PlayerConfig] = []
-            for p in self._players.values():
-                if p.rtp_ssrc is not None and ssrc is not None and p.rtp_ssrc == ssrc:
-                    by_ssrc = p
-                    break
-                if p.source_ip and p.source_ip == source_ip:
-                    if (
-                        p.rtp_ssrc is not None
-                        and ssrc is not None
-                        and p.rtp_ssrc != ssrc
-                    ):
-                        # Same IP but a different RTP session — let it
-                        # fall through to auto-create / unassigned.
-                        continue
-                    by_ip = by_ip or p
-                elif not p.has_explicit_filter and not p.auto:
-                    unfiltered.append(p)
+            if ma_match is None:
+                by_ssrc = None
+                by_ip = None
+                unfiltered: List[PlayerConfig] = []
+                for p in self._players.values():
+                    if p.rtp_ssrc is not None and ssrc is not None and p.rtp_ssrc == ssrc:
+                        by_ssrc = p
+                        break
+                    if p.source_ip and p.source_ip == source_ip:
+                        if (
+                            p.rtp_ssrc is not None
+                            and ssrc is not None
+                            and p.rtp_ssrc != ssrc
+                        ):
+                            # Same IP but a different RTP session — let it
+                            # fall through to auto-create / unassigned.
+                            continue
+                        by_ip = by_ip or p
+                    elif not p.has_explicit_filter and not p.auto:
+                        unfiltered.append(p)
 
-            match = by_ssrc or by_ip
-            if match is not None:
-                self._bind_locked(key, match.name, now)
-                return match.name
+                match = by_ssrc or by_ip
+                if match is not None:
+                    self._bind_locked(key, match.name, now)
+                    return match.name
 
-            if self._auto_discover and len(unfiltered) == 1:
-                target = unfiltered[0]
-                logger.info(
-                    f"Auto-binding stream {source_ip}:{source_port} "
-                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}) "
-                    f"to unfiltered player '{target.name}'"
-                )
-                self._bind_locked(key, target.name, now)
-                return target.name
+                if self._auto_discover and len(unfiltered) == 1:
+                    target = unfiltered[0]
+                    logger.info(
+                        f"Auto-binding stream {source_ip}:{source_port} "
+                        f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}) "
+                        f"to unfiltered player '{target.name}'"
+                    )
+                    self._bind_locked(key, target.name, now)
+                    return target.name
 
+            if ma_match is not None:
+                # Identity match handled above; skip auto-create / fallback
+                pass
             # UX-first auto-create: if no configured players match, spin up a
             # new auto-player for this source so the user never has to edit
             # YAML. Display name falls back to the source IP until an MA
             # resolver or a manual rename fills it in.
-            if self._auto_create_players:
+            elif self._auto_create_players:
                 self._auto_counter += 1
                 name = f"{AUTO_PLAYER_PREFIX}{self._auto_counter}"
                 while name in self._players:
                     self._auto_counter += 1
                     name = f"{AUTO_PLAYER_PREFIX}{self._auto_counter}"
+                # Prefer the MA-supplied identity from the first packet so
+                # the UI never shows an IP when the sender provides a name.
+                initial_display = (ma_player_name or "").strip() or source_ip
                 new_player = PlayerConfig(
                     name=name,
                     source_ip=source_ip,
                     rtp_ssrc=ssrc,
                     auto=True,
-                    display_name=source_ip,
+                    display_name=initial_display,
+                    ma_display_name=(ma_player_name or None),
+                    music_assistant_player_id=(ma_player_id or None),
                 )
                 self._players[name] = new_player
                 self._bind_locked(key, name, now)
                 logger.info(
                     f"Auto-created player '{name}' for {source_ip}:{source_port} "
-                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'})"
+                    f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}, "
+                    f"ma_name={ma_player_name!r}, ma_id={ma_player_id!r})"
                 )
 
             # Fallback: if there's exactly one player total (including auto), use it.
@@ -506,6 +562,11 @@ class PlayerRegistry:
             self._save_persisted()
             self._notify_player_added(new_player)
             return new_player.name
+        if ma_match is not None:
+            # Updated source_ip / rtp_ssrc and possibly dropped duplicates —
+            # persist so the change survives restart.
+            self._save_persisted()
+            return ma_match.name
         return None
 
     def bind(self, source_ip: str, ssrc: Optional[int], player_name: str) -> bool:
@@ -527,6 +588,89 @@ class PlayerRegistry:
 
     # ------------------------------------------------------------------
     # Internals
+
+    def _find_by_ma_identity_locked(
+        self,
+        ma_player_id: Optional[str],
+        ma_player_name: Optional[str],
+    ) -> Optional[PlayerConfig]:
+        """Find an existing player that matches an MA identity hint."""
+        ma_id = (ma_player_id or "").strip() or None
+        ma_name = (ma_player_name or "").strip() or None
+        if ma_id is None and ma_name is None:
+            return None
+
+        if ma_id is not None:
+            for p in self._players.values():
+                if p.music_assistant_player_id == ma_id:
+                    return p
+        if ma_name is not None:
+            # ma_display_name is the authoritative match source; fall back
+            # to display_name for players that predate this field (e.g.
+            # were auto-created under a different SSRC and then manually
+            # labelled by the user before senders shipped the extension).
+            for p in self._players.values():
+                if p.ma_display_name == ma_name:
+                    return p
+            for p in self._players.values():
+                if p.display_name == ma_name:
+                    return p
+        return None
+
+    def _consolidate_ma_duplicates_locked(
+        self,
+        keep: PlayerConfig,
+        ma_player_id: Optional[str],
+        ma_player_name: Optional[str],
+    ) -> List[str]:
+        """
+        Drop other auto-players that share the MA identity of ``keep``.
+
+        Each duplicate's learned bindings are rewritten to the surviving
+        player so any late packets still reach the right stream.  Manual
+        (non-auto) players and players currently holding an active stream
+        binding with a *different* SSRC are left alone — the caller only
+        asks to consolidate when the new session is authoritative.
+        """
+        ma_id = (ma_player_id or "").strip() or None
+        ma_name = (ma_player_name or "").strip() or None
+        if ma_id is None and ma_name is None:
+            return []
+
+        to_drop: List[PlayerConfig] = []
+        for p in self._players.values():
+            if p.name == keep.name or not p.auto:
+                continue
+            if ma_id is not None and p.music_assistant_player_id == ma_id:
+                to_drop.append(p)
+                continue
+            if ma_name is not None and (
+                p.ma_display_name == ma_name or p.display_name == ma_name
+            ):
+                to_drop.append(p)
+
+        dropped: List[str] = []
+        for p in to_drop:
+            # Rewrite any learned bindings so stragglers route to ``keep``.
+            for key, (pname, ts) in list(self._learned.items()):
+                if pname == p.name:
+                    self._learned[key] = (keep.name, ts)
+                    s = self._streams.get(key)
+                    if s is not None:
+                        s.bound_player = keep.name
+            # If the user renamed the duplicate before the merge and the
+            # survivor still has its IP-fallback label, carry the rename
+            # across so the human choice is preserved.
+            if (
+                p.display_name_is_manual
+                and p.display_name
+                and not keep.display_name_is_manual
+            ):
+                keep.display_name = p.display_name
+                keep.display_name_is_manual = True
+            self._players.pop(p.name, None)
+            dropped.append(p.name)
+        return dropped
 
     def _record_stream(
         self,
