@@ -49,7 +49,8 @@ class RtpPacket:
     """Parsed RTP packet."""
 
     __slots__ = ('version', 'padding', 'extension', 'cc', 'marker',
-                 'payload_type', 'sequence', 'timestamp', 'ssrc', 'payload')
+                 'payload_type', 'sequence', 'timestamp', 'ssrc', 'payload',
+                 'ma_name', 'ma_player_id')
 
     def __init__(self, data: bytes):
         if len(data) < RTP_HEADER_MIN_SIZE:
@@ -69,14 +70,27 @@ class RtpPacket:
         self.sequence, self.timestamp, self.ssrc = struct.unpack_from(
             '!HII', data, 2
         )
+        self.ma_name: Optional[str] = None
+        self.ma_player_id: Optional[str] = None
 
         # Skip CSRC list (4 bytes each)
         header_len = RTP_HEADER_MIN_SIZE + self.cc * 4
 
         # Skip extension header if present
         if self.extension and len(data) >= header_len + 4:
-            ext_len = struct.unpack_from('!HH', data, header_len)[1]
-            header_len += 4 + ext_len * 4
+            profile, ext_len_words = struct.unpack_from('!HH', data, header_len)
+            ext_data_start = header_len + 4
+            ext_data_len = ext_len_words * 4
+            ext_data_end = ext_data_start + ext_data_len
+            if len(data) >= ext_data_end:
+                if profile == 0xBEDE:
+                    ext_data = data[ext_data_start:ext_data_end]
+                    # MA sender uses element TLVs inside the BEDE extension.
+                    # Keep one-byte RFC5285 parsing as a fallback for
+                    # compatibility with older senders.
+                    if not self._parse_tlv_extension(ext_data):
+                        self._parse_one_byte_extension(ext_data)
+                header_len = ext_data_end
 
         # Handle padding
         payload_end = len(data)
@@ -85,6 +99,81 @@ class RtpPacket:
             payload_end -= pad_len
 
         self.payload = data[header_len:payload_end]
+
+    def _parse_one_byte_extension(self, ext_data: bytes) -> None:
+        """
+        Parse RFC 5285 one-byte RTP header extension items.
+
+        We use ID 1 for MA display name and ID 2 for MA player id.
+        """
+        idx = 0
+        data_len = len(ext_data)
+        while idx < data_len:
+            b = ext_data[idx]
+            idx += 1
+
+            # ID 0 = padding byte
+            if b == 0:
+                continue
+
+            ext_id = (b >> 4) & 0x0F
+            ext_len = (b & 0x0F) + 1
+
+            # ID 15 is reserved as "stop parsing"
+            if ext_id == 15:
+                break
+
+            if idx + ext_len > data_len:
+                break
+
+            value = ext_data[idx:idx + ext_len]
+            idx += ext_len
+
+            if ext_id == 1:
+                self.ma_name = value.decode("utf-8", errors="ignore").strip() or None
+            elif ext_id == 2:
+                self.ma_player_id = value.decode("utf-8", errors="ignore").strip() or None
+
+    def _parse_tlv_extension(self, ext_data: bytes) -> bool:
+        """
+        Parse custom RTP extension TLVs: [id][len][value...].
+
+        Returns True when at least one MA field was decoded.
+        """
+        idx = 0
+        parsed = False
+        data_len = len(ext_data)
+        while idx < data_len:
+            ext_id = ext_data[idx]
+            idx += 1
+
+            # Padding/alignment byte
+            if ext_id == 0:
+                continue
+            # Reserved stop marker for RFC5285 compatibility
+            if ext_id == 15:
+                break
+            if idx >= data_len:
+                break
+
+            ext_len = ext_data[idx]
+            idx += 1
+            if ext_len <= 0:
+                continue
+            if idx + ext_len > data_len:
+                break
+
+            value = ext_data[idx:idx + ext_len]
+            idx += ext_len
+
+            if ext_id == 1:
+                self.ma_name = value.decode("utf-8", errors="ignore").strip() or None
+                parsed = parsed or bool(self.ma_name)
+            elif ext_id == 2:
+                self.ma_player_id = value.decode("utf-8", errors="ignore").strip() or None
+                parsed = parsed or bool(self.ma_player_id)
+
+        return parsed
 
 
 def _seq_distance(a: int, b: int) -> int:
@@ -246,8 +335,11 @@ class _PlayerStream:
     """
 
     def __init__(self, name: str, sample_rate: int, frame_size: int,
-                 jitter_buffer_ms: int):
+                 jitter_buffer_ms: int, source_ip: Optional[str] = None,
+                 registry: Optional[PlayerRegistry] = None):
         self.name = name
+        self._source_ip = source_ip
+        self._registry = registry
         self._sample_rate = sample_rate
         self._frame_size = frame_size
         self._jitter_buffer_ms = jitter_buffer_ms
@@ -369,6 +461,14 @@ class _PlayerStream:
         except ValueError as exc:
             logger.debug(f"RTP parse error on player '{self.name}': {exc}")
             return
+
+        if pkt.ma_name and self._registry and self._source_ip:
+            self._registry.set_display_name_from_stream(
+                source_ip=self._source_ip,
+                ssrc=pkt.ssrc,
+                display_name=pkt.ma_name,
+                player_id=pkt.ma_player_id,
+            )
 
         self._packets_received += 1
         results = self._jitter_buffer.push(pkt)
@@ -605,12 +705,19 @@ class UdpAudioCapture:
                 sample_rate=self._sample_rate,
                 frame_size=self._frame_size,
                 jitter_buffer_ms=self._jitter_buffer_ms,
+                source_ip=source_ip,
+                registry=self._registry,
             )
             self._streams[player_name] = stream
             logger.info(
                 f"Player stream created: '{player_name}' "
                 f"(first packet from {source_ip}:{source_port})"
             )
+        else:
+            if stream._source_ip is None:
+                stream._source_ip = source_ip
+            if stream._registry is None:
+                stream._registry = self._registry
 
         stream.handle_packet(data, is_rtp)
 
@@ -639,6 +746,7 @@ class UdpAudioCapture:
                 sample_rate=self._sample_rate,
                 frame_size=self._frame_size,
                 jitter_buffer_ms=self._jitter_buffer_ms,
+                registry=self._registry,
             )
             self._streams[target] = stream
 
