@@ -50,6 +50,10 @@ class PlayerConfig:
     # Display name shown in the UI. May be derived from Music Assistant or
     # set manually via /api/players/<name>/rename. Defaults to ``name``.
     display_name: Optional[str] = None
+    # True once a user has explicitly renamed the player via the UI. Stream-
+    # supplied names (RTP header extension) must not overwrite a manual
+    # rename — only the user can undo that.
+    display_name_is_manual: bool = False
 
     def matches(self, source_ip: Optional[str], ssrc: Optional[int]) -> bool:
         if self.rtp_ssrc is not None and ssrc is not None and self.rtp_ssrc == ssrc:
@@ -208,8 +212,54 @@ class PlayerRegistry:
             if p is None:
                 return False
             p.display_name = new_label or None
+            # Manual rename pins the label against later stream-supplied names.
+            # Clearing the label releases the pin so stream updates can resume.
+            p.display_name_is_manual = bool(new_label)
         self._save_persisted()
         return True
+
+    def apply_stream_identity(
+        self,
+        source_ip: str,
+        ssrc: Optional[int],
+        display_name: Optional[str] = None,
+        ma_player_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Update a player's display_name / MA player id from data carried in
+        the stream (e.g. an RTP header extension).
+
+        Does nothing if no player matches ``(source_ip, ssrc)`` — the caller
+        must have already resolved / auto-created the player via ``resolve``.
+        A manual UI rename is preserved; stream names only fill gaps.
+
+        Returns True when any field changed (so the caller can log).
+        """
+        display = (display_name or "").strip() or None
+        ma_id = (ma_player_id or "").strip() or None
+        if display is None and ma_id is None:
+            return False
+
+        changed = False
+        with self._lock:
+            learned = self._learned.get((source_ip, ssrc))
+            if learned is None:
+                return False
+            pname, _ = learned
+            p = self._players.get(pname)
+            if p is None:
+                return False
+
+            if display and not p.display_name_is_manual and p.display_name != display:
+                p.display_name = display
+                changed = True
+            if ma_id and p.music_assistant_player_id != ma_id:
+                p.music_assistant_player_id = ma_id
+                changed = True
+
+        if changed:
+            self._save_persisted()
+        return changed
 
     def _load_persisted(self) -> None:
         path = self._persistence_path
@@ -224,6 +274,7 @@ class PlayerRegistry:
         auto_players = data.get("auto_players") or []
         counter = int(data.get("auto_counter") or 0)
         renames = data.get("display_names") or {}
+        manual_renames = set(data.get("manual_renames") or [])
         with self._lock:
             for entry in auto_players:
                 name = (entry.get("name") or "").strip()
@@ -237,6 +288,7 @@ class PlayerRegistry:
                     description=entry.get("description") or None,
                     auto=True,
                     display_name=entry.get("display_name") or None,
+                    display_name_is_manual=bool(entry.get("display_name_is_manual")),
                 )
             if counter > self._auto_counter:
                 self._auto_counter = counter
@@ -244,6 +296,8 @@ class PlayerRegistry:
                 p = self._players.get(name)
                 if p is not None and label:
                     p.display_name = str(label)
+                    if name in manual_renames:
+                        p.display_name_is_manual = True
         logger.info(
             f"Player registry restored from {path}: "
             f"{len(auto_players)} auto-players, {len(renames)} renames"
@@ -262,6 +316,7 @@ class PlayerRegistry:
                     "music_assistant_player_id": p.music_assistant_player_id,
                     "description": p.description,
                     "display_name": p.display_name,
+                    "display_name_is_manual": p.display_name_is_manual,
                 }
                 for p in self._players.values()
                 if p.auto
@@ -271,10 +326,16 @@ class PlayerRegistry:
                 for p in self._players.values()
                 if p.display_name
             }
+            manual_renames = [
+                p.name
+                for p in self._players.values()
+                if p.display_name_is_manual
+            ]
             data = {
                 "auto_counter": self._auto_counter,
                 "auto_players": auto_players,
                 "display_names": renames,
+                "manual_renames": manual_renames,
             }
         try:
             tmp = f"{path}.tmp"
