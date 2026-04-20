@@ -244,6 +244,7 @@ class PlayerRegistry:
                 p = self._players.get(name)
                 if p is not None and label:
                     p.display_name = str(label)
+            self._dedupe_auto_players_locked()
         logger.info(
             f"Player registry restored from {path}: "
             f"{len(auto_players)} auto-players, {len(renames)} renames"
@@ -284,6 +285,42 @@ class PlayerRegistry:
             os.replace(tmp, path)
         except Exception as exc:
             logger.debug(f"Could not persist players to {path}: {exc}")
+
+    def _dedupe_auto_players_locked(self) -> bool:
+        """
+        Collapse obviously duplicate auto-players loaded from persistence.
+        """
+        by_ip: Dict[str, List[PlayerConfig]] = {}
+        for p in self._players.values():
+            if p.auto and p.source_ip:
+                by_ip.setdefault(p.source_ip, []).append(p)
+
+        removed_any = False
+        for source_ip, players in by_ip.items():
+            if len(players) <= 1:
+                continue
+            keep = self._pick_preferred_auto_player(players, source_ip)
+            for p in players:
+                if p.name == keep.name:
+                    continue
+                self._players.pop(p.name, None)
+                removed_any = True
+        return removed_any
+
+    @staticmethod
+    def _pick_preferred_auto_player(
+        players: List[PlayerConfig],
+        source_ip: str,
+    ) -> PlayerConfig:
+        """
+        Choose the most informative auto-player among candidates for one IP.
+        """
+        def score(p: PlayerConfig) -> tuple[int, int]:
+            has_ma_id = 1 if p.music_assistant_player_id else 0
+            has_friendly = 1 if (p.display_name and p.display_name != source_ip) else 0
+            return (has_ma_id, has_friendly)
+
+        return max(players, key=score)
 
     def set_music_assistant_player(self, player_name: str, ma_player_id: Optional[str]) -> bool:
         """Bind an MA player_id to one of our logical players (for MA-derived names)."""
@@ -381,9 +418,53 @@ class PlayerRegistry:
                 canonical.music_assistant_player_id = clean_player_id
                 updated = True
 
+            removed = self._remove_stale_auto_players_locked(
+                source_ip=source_ip,
+                keep_name=canonical.name,
+                canonical_player_id=clean_player_id,
+                canonical_display_name=clean_name,
+            )
+            updated = updated or removed
+
         if updated:
             self._save_persisted()
         return updated
+
+    def _remove_stale_auto_players_locked(
+        self,
+        source_ip: str,
+        keep_name: str,
+        canonical_player_id: Optional[str],
+        canonical_display_name: str,
+    ) -> bool:
+        """
+        Remove stale auto-players for the same source IP that are no longer bound.
+        """
+        active_players = {name for name, _ in self._learned.values()}
+        active_players.update(
+            s.bound_player for s in self._streams.values() if s.bound_player
+        )
+
+        removed_any = False
+        for name, p in list(self._players.items()):
+            if name == keep_name or not p.auto or p.source_ip != source_ip:
+                continue
+            if name in active_players:
+                continue
+
+            same_identity = False
+            if canonical_player_id and p.music_assistant_player_id == canonical_player_id:
+                same_identity = True
+            if (p.display_name or "").strip() == canonical_display_name:
+                same_identity = True
+            if (p.display_name or "").strip() == source_ip:
+                same_identity = True
+
+            if same_identity:
+                self._players.pop(name, None)
+                removed_any = True
+
+        return removed_any
 
     def ensure_default_player(self) -> PlayerConfig:
         """
@@ -490,8 +571,8 @@ class PlayerRegistry:
                 self._bind_locked(key, match.name, now)
                 return match.name
 
-            if self._auto_create_players and len(auto_by_ip) == 1:
-                target = auto_by_ip[0]
+            if self._auto_create_players and auto_by_ip:
+                target = self._pick_preferred_auto_player(auto_by_ip, source_ip)
                 target.rtp_ssrc = ssrc
                 self._bind_locked(key, target.name, now)
                 return target.name

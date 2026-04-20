@@ -84,7 +84,12 @@ class RtpPacket:
             ext_data_end = ext_data_start + ext_data_len
             if len(data) >= ext_data_end:
                 if profile == 0xBEDE:
-                    self._parse_one_byte_extension(data[ext_data_start:ext_data_end])
+                    ext_data = data[ext_data_start:ext_data_end]
+                    # MA sender uses element TLVs inside the BEDE extension.
+                    # Keep one-byte RFC5285 parsing as a fallback for
+                    # compatibility with older senders.
+                    if not self._parse_tlv_extension(ext_data):
+                        self._parse_one_byte_extension(ext_data)
                 header_len = ext_data_end
 
         # Handle padding
@@ -128,6 +133,47 @@ class RtpPacket:
                 self.ma_name = value.decode("utf-8", errors="ignore").strip() or None
             elif ext_id == 2:
                 self.ma_player_id = value.decode("utf-8", errors="ignore").strip() or None
+
+    def _parse_tlv_extension(self, ext_data: bytes) -> bool:
+        """
+        Parse custom RTP extension TLVs: [id][len][value...].
+
+        Returns True when at least one MA field was decoded.
+        """
+        idx = 0
+        parsed = False
+        data_len = len(ext_data)
+        while idx < data_len:
+            ext_id = ext_data[idx]
+            idx += 1
+
+            # Padding/alignment byte
+            if ext_id == 0:
+                continue
+            # Reserved stop marker for RFC5285 compatibility
+            if ext_id == 15:
+                break
+            if idx >= data_len:
+                break
+
+            ext_len = ext_data[idx]
+            idx += 1
+            if ext_len <= 0:
+                continue
+            if idx + ext_len > data_len:
+                break
+
+            value = ext_data[idx:idx + ext_len]
+            idx += ext_len
+
+            if ext_id == 1:
+                self.ma_name = value.decode("utf-8", errors="ignore").strip() or None
+                parsed = parsed or bool(self.ma_name)
+            elif ext_id == 2:
+                self.ma_player_id = value.decode("utf-8", errors="ignore").strip() or None
+                parsed = parsed or bool(self.ma_player_id)
+
+        return parsed
 
 
 def _seq_distance(a: int, b: int) -> int:
