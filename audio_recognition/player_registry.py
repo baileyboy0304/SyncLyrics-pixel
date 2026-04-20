@@ -295,6 +295,96 @@ class PlayerRegistry:
         self._save_persisted()
         return True
 
+    def set_display_name_from_stream(
+        self,
+        source_ip: str,
+        ssrc: Optional[int],
+        display_name: Optional[str],
+        player_id: Optional[str],
+    ) -> bool:
+        """
+        Update display metadata for the player that currently owns a stream.
+
+        Used when RTP extension metadata carries a Music Assistant display name.
+        """
+        clean_name = (display_name or "").strip()
+        clean_player_id = (player_id or "").strip() or None
+        if not clean_name:
+            return False
+
+        updated = False
+        with self._lock:
+            key = (source_ip, ssrc)
+            resolved: Optional[str] = None
+
+            learned = self._learned.get(key)
+            if learned is not None:
+                learned_name, _ = learned
+                if learned_name in self._players:
+                    resolved = learned_name
+
+            if resolved is None:
+                for p in self._players.values():
+                    if p.matches(source_ip, ssrc):
+                        resolved = p.name
+                        break
+
+            if resolved is None:
+                return False
+
+            player = self._players.get(resolved)
+            if player is None:
+                return False
+
+            canonical = player
+            now = time.time()
+
+            if clean_player_id:
+                existing = next(
+                    (
+                        p for p in self._players.values()
+                        if p.name != player.name
+                        and p.music_assistant_player_id == clean_player_id
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    canonical = existing
+                    self._bind_locked(key, canonical.name, now)
+                    stream = self._streams.get(key)
+                    if stream is not None:
+                        stream.bound_player = canonical.name
+                    if player.auto:
+                        self._players.pop(player.name, None)
+            elif player.auto:
+                existing = next(
+                    (
+                        p for p in self._players.values()
+                        if p.name != player.name
+                        and p.source_ip == source_ip
+                        and (p.display_name or "").strip() == clean_name
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    canonical = existing
+                    self._bind_locked(key, canonical.name, now)
+                    stream = self._streams.get(key)
+                    if stream is not None:
+                        stream.bound_player = canonical.name
+                    self._players.pop(player.name, None)
+
+            if canonical.display_name != clean_name:
+                canonical.display_name = clean_name
+                updated = True
+            if canonical.music_assistant_player_id != clean_player_id:
+                canonical.music_assistant_player_id = clean_player_id
+                updated = True
+
+        if updated:
+            self._save_persisted()
+        return updated
+
     def ensure_default_player(self) -> PlayerConfig:
         """
         Guarantee at least one player exists. In single-player (legacy) mode
@@ -374,12 +464,15 @@ class PlayerRegistry:
             # and trash both streams.
             by_ssrc = None
             by_ip = None
+            auto_by_ip: List[PlayerConfig] = []
             unfiltered: List[PlayerConfig] = []
             for p in self._players.values():
                 if p.rtp_ssrc is not None and ssrc is not None and p.rtp_ssrc == ssrc:
                     by_ssrc = p
                     break
                 if p.source_ip and p.source_ip == source_ip:
+                    if p.auto:
+                        auto_by_ip.append(p)
                     if (
                         p.rtp_ssrc is not None
                         and ssrc is not None
@@ -396,6 +489,12 @@ class PlayerRegistry:
             if match is not None:
                 self._bind_locked(key, match.name, now)
                 return match.name
+
+            if self._auto_create_players and len(auto_by_ip) == 1:
+                target = auto_by_ip[0]
+                target.rtp_ssrc = ssrc
+                self._bind_locked(key, target.name, now)
+                return target.name
 
             if self._auto_discover and len(unfiltered) == 1:
                 target = unfiltered[0]
