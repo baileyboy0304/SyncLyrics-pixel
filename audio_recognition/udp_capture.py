@@ -667,6 +667,11 @@ class UdpAudioCapture:
                 f"Player stream created: '{player_name}' "
                 f"(first packet from {source_ip}:{source_port})"
             )
+        else:
+            if stream._source_ip is None:
+                stream._source_ip = source_ip
+            if stream._registry is None:
+                stream._registry = self._registry
 
         stream.handle_packet(data, is_rtp)
 

@@ -336,11 +336,49 @@ class PlayerRegistry:
             if player is None:
                 return False
 
-            if player.display_name != clean_name:
-                player.display_name = clean_name
+            canonical = player
+            now = time.time()
+
+            if clean_player_id:
+                existing = next(
+                    (
+                        p for p in self._players.values()
+                        if p.name != player.name
+                        and p.music_assistant_player_id == clean_player_id
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    canonical = existing
+                    self._bind_locked(key, canonical.name, now)
+                    stream = self._streams.get(key)
+                    if stream is not None:
+                        stream.bound_player = canonical.name
+                    if player.auto:
+                        self._players.pop(player.name, None)
+            elif player.auto:
+                existing = next(
+                    (
+                        p for p in self._players.values()
+                        if p.name != player.name
+                        and p.source_ip == source_ip
+                        and (p.display_name or "").strip() == clean_name
+                    ),
+                    None,
+                )
+                if existing is not None:
+                    canonical = existing
+                    self._bind_locked(key, canonical.name, now)
+                    stream = self._streams.get(key)
+                    if stream is not None:
+                        stream.bound_player = canonical.name
+                    self._players.pop(player.name, None)
+
+            if canonical.display_name != clean_name:
+                canonical.display_name = clean_name
                 updated = True
-            if player.music_assistant_player_id != clean_player_id:
-                player.music_assistant_player_id = clean_player_id
+            if canonical.music_assistant_player_id != clean_player_id:
+                canonical.music_assistant_player_id = clean_player_id
                 updated = True
 
         if updated:
@@ -426,12 +464,15 @@ class PlayerRegistry:
             # and trash both streams.
             by_ssrc = None
             by_ip = None
+            auto_by_ip: List[PlayerConfig] = []
             unfiltered: List[PlayerConfig] = []
             for p in self._players.values():
                 if p.rtp_ssrc is not None and ssrc is not None and p.rtp_ssrc == ssrc:
                     by_ssrc = p
                     break
                 if p.source_ip and p.source_ip == source_ip:
+                    if p.auto:
+                        auto_by_ip.append(p)
                     if (
                         p.rtp_ssrc is not None
                         and ssrc is not None
@@ -448,6 +489,12 @@ class PlayerRegistry:
             if match is not None:
                 self._bind_locked(key, match.name, now)
                 return match.name
+
+            if self._auto_create_players and len(auto_by_ip) == 1:
+                target = auto_by_ip[0]
+                target.rtp_ssrc = ssrc
+                self._bind_locked(key, target.name, now)
+                return target.name
 
             if self._auto_discover and len(unfiltered) == 1:
                 target = unfiltered[0]
