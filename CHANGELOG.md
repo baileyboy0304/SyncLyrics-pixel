@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.31] - 2026-04-20
+
+### ✨ New Features
+
+- UDP sender can now carry the Music Assistant speaker name + `player_id` in an RFC 8285 RTP header extension, so the UI shows real names instead of IPs.
+- A new RTP session (new SSRC) from the same MA speaker re-binds to its existing player entry instead of spawning a fresh `player-N` duplicate.
+- Pre-existing auto-player duplicates collapse into one on the first identity-bearing packet; manual UI renames are preserved across the merge.
+
+### 🔧 Internal
+
+- `RtpPacket` parses RFC 8285 one-byte and two-byte header extensions.
+- `PlayerConfig` gains `ma_display_name` (authoritative MA name) and `display_name_is_manual` (pins UI renames against stream updates).
+- Senders that do not set the RTP extension bit are unaffected — legacy IP/SSRC discovery continues to work.
+
 ## [2.0.0] - 2026-01-17
 
 ### ⚠️ Breaking Changes
