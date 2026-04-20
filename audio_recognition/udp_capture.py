@@ -44,12 +44,20 @@ RTP_HEADER_MIN_SIZE = 12  # bytes (V/P/X/CC, M/PT, seq, ts, SSRC)
 DEFAULT_JITTER_BUFFER_MS = 60  # milliseconds of buffering for reorder
 MAX_JITTER_BUFFER_PACKETS = 50  # safety cap
 
+# RFC 8285 header-extension profile IDs
+RTP_EXT_PROFILE_ONE_BYTE = 0xBEDE
+RTP_EXT_PROFILE_TWO_BYTE = 0x1000
+# Element IDs used by the SyncLyrics UDP sender protocol.
+RTP_EXT_ID_MA_PLAYER_NAME = 1
+RTP_EXT_ID_MA_PLAYER_ID = 2
+
 
 class RtpPacket:
     """Parsed RTP packet."""
 
     __slots__ = ('version', 'padding', 'extension', 'cc', 'marker',
-                 'payload_type', 'sequence', 'timestamp', 'ssrc', 'payload')
+                 'payload_type', 'sequence', 'timestamp', 'ssrc', 'payload',
+                 'ext_elements')
 
     def __init__(self, data: bytes):
         if len(data) < RTP_HEADER_MIN_SIZE:
@@ -73,10 +81,21 @@ class RtpPacket:
         # Skip CSRC list (4 bytes each)
         header_len = RTP_HEADER_MIN_SIZE + self.cc * 4
 
-        # Skip extension header if present
+        # RFC 8285 header-extension elements keyed by element ID. Empty dict
+        # when no extension is present or the profile isn't understood; the
+        # rest of the pipeline treats "no elements" as "legacy sender" and
+        # falls back to the existing IP/SSRC-based identification.
+        self.ext_elements: dict[int, bytes] = {}
+
         if self.extension and len(data) >= header_len + 4:
-            ext_len = struct.unpack_from('!HH', data, header_len)[1]
-            header_len += 4 + ext_len * 4
+            profile, ext_words = struct.unpack_from('!HH', data, header_len)
+            ext_body_start = header_len + 4
+            ext_body_end = ext_body_start + ext_words * 4
+            if ext_body_end <= len(data):
+                self.ext_elements = _parse_rtp_ext_elements(
+                    profile, data[ext_body_start:ext_body_end]
+                )
+            header_len = ext_body_end
 
         # Handle padding
         payload_end = len(data)
@@ -85,6 +104,47 @@ class RtpPacket:
             payload_end -= pad_len
 
         self.payload = data[header_len:payload_end]
+
+
+def _parse_rtp_ext_elements(profile: int, body: bytes) -> dict[int, bytes]:
+    """
+    Decode an RFC 8285 header-extension body into ``{id: data}``.
+
+    Returns an empty dict for unknown profiles or malformed data — callers
+    must treat that as "no metadata supplied" and fall back to the legacy
+    IP/SSRC-only identification path.
+    """
+    out: dict[int, bytes] = {}
+    i = 0
+    n = len(body)
+
+    if profile == RTP_EXT_PROFILE_ONE_BYTE:
+        while i < n:
+            b = body[i]
+            i += 1
+            if b == 0x00:  # padding
+                continue
+            eid = (b >> 4) & 0x0F
+            length = (b & 0x0F) + 1
+            if eid == 15:  # reserved stop marker
+                break
+            if i + length > n:
+                return {}
+            out[eid] = bytes(body[i:i + length])
+            i += length
+    elif profile == RTP_EXT_PROFILE_TWO_BYTE:
+        while i + 1 < n:
+            eid = body[i]
+            length = body[i + 1]
+            i += 2
+            if eid == 0:  # padding
+                continue
+            if i + length > n:
+                return {}
+            out[eid] = bytes(body[i:i + length])
+            i += length
+
+    return out
 
 
 def _seq_distance(a: int, b: int) -> int:
@@ -613,6 +673,47 @@ class UdpAudioCapture:
             )
 
         stream.handle_packet(data, is_rtp)
+
+        # If the sender included an RFC 8285 header extension with the MA
+        # speaker name / player id, feed it to the registry so the UI shows
+        # the real name instead of the IP fallback. Legacy senders (no
+        # extension bit) bypass this block entirely.
+        if is_rtp and len(data) > 0 and ((data[0] >> 4) & 0x01):
+            self._maybe_apply_stream_identity(data, source_ip, ssrc)
+
+    def _maybe_apply_stream_identity(
+        self,
+        data: bytes,
+        source_ip: str,
+        ssrc: Optional[int],
+    ) -> None:
+        try:
+            pkt = RtpPacket(data)
+        except ValueError:
+            return
+        if not pkt.ext_elements:
+            return
+        name_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_NAME)
+        id_bytes = pkt.ext_elements.get(RTP_EXT_ID_MA_PLAYER_ID)
+        if not name_bytes and not id_bytes:
+            return
+        try:
+            display_name = name_bytes.decode('utf-8').strip() if name_bytes else None
+            ma_player_id = id_bytes.decode('utf-8').strip() if id_bytes else None
+        except UnicodeDecodeError:
+            logger.debug(f"Dropping non-UTF-8 RTP identity from {source_ip}")
+            return
+        if self._registry.apply_stream_identity(
+            source_ip=source_ip,
+            ssrc=ssrc,
+            display_name=display_name,
+            ma_player_id=ma_player_id,
+        ):
+            logger.info(
+                f"Applied stream identity from {source_ip} "
+                f"(SSRC={'0x%08X' % ssrc if ssrc is not None else 'n/a'}): "
+                f"name={display_name!r}, id={ma_player_id!r}"
+            )
 
     # ------------------------------------------------------------------
     # Consumer API
